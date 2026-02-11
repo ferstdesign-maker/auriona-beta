@@ -247,7 +247,6 @@ export default function AppPage() {
     text: "rgba(255,255,255,0.92)",
     muted: "rgba(255,255,255,0.65)",
     soft: "rgba(255,255,255,0.08)",
-    pill: "rgba(255,255,255,0.10)",
   };
 
   return (
@@ -268,10 +267,15 @@ export default function AppPage() {
           <img
             src="/auriona-logo.png"
             alt="Auriona"
-            style={{ width: 34, height: 34, borderRadius: 10, objectFit: "contain" }}
-            onError={(e) => {
-              // si no existe el archivo, que no rompa
-              (e.currentTarget as HTMLImageElement).style.display = "none";
+            style={{
+              width: 42,
+              height: 42,
+              objectFit: "contain",
+              display: "block",
+              borderRadius: 10,
+              background: "rgba(255,255,255,0.06)",
+              border: `1px solid ${C.border}`,
+              padding: 6,
             }}
           />
           <div>
