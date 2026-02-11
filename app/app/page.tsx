@@ -52,7 +52,7 @@ export default function AppPage() {
       .order("created_at", { ascending: false });
 
     if (error) {
-      console.log("loadConversations error:", error.message);
+      alert("loadConversations error: " + error.message);
       setConvs([]);
       return;
     }
@@ -127,7 +127,7 @@ export default function AppPage() {
     await loadConversations();
   }
 
-  // ✅ NUEVO: borrar conversación (borra mensajes primero, luego la conversación)
+  // ✅ BORRADO REAL + ERRORES VISIBLES
   async function deleteConversation() {
     if (activeConvId === "legacy") return;
 
@@ -135,17 +135,27 @@ export default function AppPage() {
     const ok = window.confirm(`¿Seguro que querés borrar "${title}"?\n\nSe borran también todos sus mensajes.`);
     if (!ok) return;
 
-    // 1) borrar mensajes de esa conversación
+    // 1) borrar mensajes
     const { error: e1 } = await supabase.from("messages").delete().eq("conversation_id", activeConvId);
     if (e1) {
-      alert("No pude borrar los mensajes: " + e1.message);
+      alert("No pude borrar mensajes (RLS o permisos): " + e1.message);
       return;
     }
 
-    // 2) borrar la conversación
-    const { error: e2 } = await supabase.from("conversations").delete().eq("id", activeConvId);
+    // 2) borrar conversación (con select para saber si realmente borró)
+    const { data: deleted, error: e2 } = await supabase
+      .from("conversations")
+      .delete()
+      .eq("id", activeConvId)
+      .select("id");
+
     if (e2) {
-      alert("No pude borrar la conversación: " + e2.message);
+      alert("No pude borrar conversación (RLS o permisos): " + e2.message);
+      return;
+    }
+
+    if (!deleted || deleted.length === 0) {
+      alert("Supabase NO borró la conversación. Casi seguro falta la policy de DELETE (RLS).");
       return;
     }
 
