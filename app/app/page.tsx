@@ -262,27 +262,33 @@ export default function AppPage() {
           background: C.panel,
         }}
       >
-        {/* LOGO + NOMBRE */}
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        {/* LOGO SOLO (GRANDE) */}
+        <div
+          style={{
+            width: "100%",
+            border: `1px solid ${C.border}`,
+            borderRadius: 16,
+            background: "rgba(255,255,255,0.04)",
+            padding: 14,
+            display: "grid",
+            placeItems: "center",
+          }}
+        >
           <img
             src="/auriona-logo.png"
             alt="Auriona"
             style={{
-              width: 42,
-              height: 42,
+              width: "100%",
+              maxWidth: 240,
+              height: 70,
               objectFit: "contain",
               display: "block",
-              borderRadius: 10,
-              background: "rgba(255,255,255,0.06)",
-              border: `1px solid ${C.border}`,
-              padding: 6,
             }}
           />
-          <div>
-            <div style={{ fontWeight: 900, letterSpacing: 0.2 }}>Auriona</div>
-            <div style={{ fontSize: 12, color: C.muted }}>{email}</div>
-          </div>
         </div>
+
+        {/* (si querés ocultar también el email, borrá este bloque) */}
+        <div style={{ fontSize: 12, color: C.muted, marginTop: -4 }}>{email}</div>
 
         <button
           onClick={createConversation}
@@ -293,7 +299,7 @@ export default function AppPage() {
             background: C.panel2,
             color: C.text,
             cursor: "pointer",
-            fontWeight: 700,
+            fontWeight: 800,
           }}
         >
           + Nueva conversación
@@ -353,6 +359,7 @@ export default function AppPage() {
               background: "transparent",
               color: C.text,
               cursor: "pointer",
+              fontWeight: 700,
             }}
           >
             Cerrar sesión
