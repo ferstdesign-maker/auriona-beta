@@ -1,62 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "../../lib/supabase";
 
-export default function Login() {
+type Lang = "es" | "pt" | "en";
+
+export default function LoginPage() {
   const [email, setEmail] = useState("");
-  const [pass, setPass] = useState("");
+  const [password, setPassword] = useState("");
   const [showPass, setShowPass] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState("");
-
-  // idioma elegido en login (banderitas)
-  const [lang, setLang] = useState<"es" | "pt" | "en">(() => {
-    const v = (typeof window !== "undefined" && localStorage.getItem("auri_lang")) || "es";
-    return (v === "pt" || v === "en" || v === "es") ? (v as any) : "es";
-  });
-
-  function setLangAndSave(v: "es" | "pt" | "en") {
-    setLang(v);
-    localStorage.setItem("auri_lang", v);
-  }
-
-  async function signIn() {
-    setMsg("");
-    setBusy(true);
-    const { error } = await supabase.auth.signInWithPassword({ email, password: pass });
-    setBusy(false);
-
-    if (error) {
-      setMsg(error.message);
-      return;
-    }
-
-    // guardamos idioma en metadata si podemos (no bloqueante)
-    await supabase.auth.updateUser({ data: { lang } });
-
-    window.location.href = "/onboarding";
-  }
-
-  async function signUp() {
-    setMsg("");
-    setBusy(true);
-
-    const { error } = await supabase.auth.signUp({
-      email,
-      password: pass,
-      options: { data: { lang } },
-    });
-
-    setBusy(false);
-
-    if (error) {
-      setMsg(error.message);
-      return;
-    }
-
-    setMsg("Cuenta creada. Iniciá sesión.");
-  }
+  const [lang, setLang] = useState<Lang>("es");
 
   const C = {
     bg: "#0b0f17",
@@ -67,67 +21,198 @@ export default function Login() {
     soft: "rgba(255,255,255,0.06)",
   };
 
+  useEffect(() => {
+    const saved = localStorage.getItem("auri_lang") as Lang | null;
+    if (saved) setLang(saved);
+  }, []);
+
+  function setLangAndSave(l: Lang) {
+    setLang(l);
+    localStorage.setItem("auri_lang", l);
+  }
+
+  function flagBtn(active: boolean) {
+    return {
+      padding: "10px",
+      borderRadius: 14,
+      border: `1px solid ${C.border}`,
+      background: active ? C.soft : "transparent",
+      cursor: "pointer",
+      display: "grid",
+      placeItems: "center",
+    } as const;
+  }
+
+  async function login() {
+    if (!email || !password) return;
+    setBusy(true);
+
+    const { error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+    setBusy(false);
+
+    if (error) {
+      alert(error.message);
+      return;
+    }
+
+    window.location.href = "/app";
+  }
+
+  async function register() {
+    if (!email || !password) return;
+    setBusy(true);
+
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+    });
+
+    setBusy(false);
+
+    if (error) {
+      alert(error.message);
+      return;
+    }
+
+    alert("Registro creado — ahora ingresá.");
+  }
+
   return (
-    <main style={{ minHeight: "100vh", background: C.bg, color: C.text, display: "grid", placeItems: "center", padding: 18 }}>
-      <div style={{ width: "100%", maxWidth: 520, border: `1px solid ${C.border}`, borderRadius: 22, background: C.panel, padding: 18 }}>
-        <div style={{ display: "grid", placeItems: "center", gap: 10, paddingTop: 6 }}>
-          <img src="/auriona-logo.png" alt="Auriona" style={{ width: "100%", maxWidth: 320, height: 100, objectFit: "contain" }} />
-          <div style={{ fontSize: 12, color: C.muted }}>Inicio de sesión</div>
-        </div>
-
-        {/* banderas */}
-        <div style={{ display: "flex", justifyContent: "center", gap: 10, marginTop: 8 }}>
-          <button onClick={() => setLangAndSave("es")} style={{ padding: "8px 12px", borderRadius: 14, border: `1px solid ${C.border}`, background: lang === "es" ? C.soft : "transparent", color: C.text, cursor: "pointer", fontWeight: 900 }}>
-            🇦🇷 ES
-          </button>
-          <button onClick={() => setLangAndSave("pt")} style={{ padding: "8px 12px", borderRadius: 14, border: `1px solid ${C.border}`, background: lang === "pt" ? C.soft : "transparent", color: C.text, cursor: "pointer", fontWeight: 900 }}>
-            🇧🇷 PT
-          </button>
-          <button onClick={() => setLangAndSave("en")} style={{ padding: "8px 12px", borderRadius: 14, border: `1px solid ${C.border}`, background: lang === "en" ? C.soft : "transparent", color: C.text, cursor: "pointer", fontWeight: 900 }}>
-            🇺🇸 EN
-          </button>
-        </div>
-
-        <div style={{ marginTop: 14 }}>
-          <input
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="tu@email.com"
-            style={{ width: "100%", padding: 12, borderRadius: 16, border: `1px solid ${C.border}`, background: "transparent", color: C.text, outline: "none" }}
+    <main
+      style={{
+        minHeight: "100vh",
+        display: "grid",
+        placeItems: "center",
+        background: C.bg,
+        color: C.text,
+        padding: 20,
+      }}
+    >
+      <div
+        style={{
+          width: 380,
+          borderRadius: 20,
+          border: `1px solid ${C.border}`,
+          background: C.panel,
+          padding: 24,
+          display: "flex",
+          flexDirection: "column",
+          gap: 14,
+        }}
+      >
+        {/* LOGO */}
+        <div style={{ display: "grid", placeItems: "center" }}>
+          <img
+            src="/auriona-logo.png"
+            alt="Auriona"
+            style={{ width: 220, objectFit: "contain" }}
           />
         </div>
 
-        <div style={{ marginTop: 10, display: "flex", gap: 10 }}>
+        {/* BANDERAS */}
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "center",
+            gap: 10,
+            marginTop: 6,
+          }}
+        >
+          <button onClick={() => setLangAndSave("es")} style={flagBtn(lang === "es")}>
+            <img src="/flags/ar.png" width={24} />
+          </button>
+
+          <button onClick={() => setLangAndSave("pt")} style={flagBtn(lang === "pt")}>
+            <img src="/flags/br.png" width={24} />
+          </button>
+
+          <button onClick={() => setLangAndSave("en")} style={flagBtn(lang === "en")}>
+            <img src="/flags/us.png" width={24} />
+          </button>
+        </div>
+
+        {/* EMAIL */}
+        <input
+          placeholder="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          style={{
+            padding: 12,
+            borderRadius: 12,
+            border: `1px solid ${C.border}`,
+            background: "transparent",
+            color: C.text,
+          }}
+        />
+
+        {/* PASSWORD + OJO */}
+        <div style={{ position: "relative" }}>
           <input
-            value={pass}
-            onChange={(e) => setPass(e.target.value)}
-            placeholder="contraseña"
             type={showPass ? "text" : "password"}
-            style={{ flex: 1, padding: 12, borderRadius: 16, border: `1px solid ${C.border}`, background: "transparent", color: C.text, outline: "none" }}
+            placeholder="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            style={{
+              width: "100%",
+              padding: 12,
+              borderRadius: 12,
+              border: `1px solid ${C.border}`,
+              background: "transparent",
+              color: C.text,
+            }}
           />
+
           <button
-            onClick={() => setShowPass((v) => !v)}
-            style={{ padding: "12px 14px", borderRadius: 16, border: `1px solid ${C.border}`, background: "transparent", color: C.text, cursor: "pointer", fontWeight: 900, minWidth: 56 }}
-            title="Mostrar/ocultar"
+            onClick={() => setShowPass(!showPass)}
+            style={{
+              position: "absolute",
+              right: 8,
+              top: 6,
+              background: "transparent",
+              border: "none",
+              cursor: "pointer",
+              color: C.muted,
+            }}
           >
-            {showPass ? "🙈" : "👁"}
+            👁
           </button>
         </div>
 
-        {msg && (
-          <div style={{ marginTop: 10, fontSize: 13, color: C.muted, border: `1px solid ${C.border}`, borderRadius: 16, padding: 10, background: "rgba(255,255,255,0.03)" }}>
-            {msg}
-          </div>
-        )}
+        {/* BOTONES */}
+        <button
+          onClick={login}
+          disabled={busy}
+          style={{
+            padding: 12,
+            borderRadius: 12,
+            border: `1px solid ${C.border}`,
+            background: C.soft,
+            color: C.text,
+            fontWeight: 800,
+            cursor: "pointer",
+          }}
+        >
+          Ingresar
+        </button>
 
-        <div style={{ marginTop: 14, display: "flex", gap: 10 }}>
-          <button onClick={signIn} disabled={busy} style={{ flex: 1, padding: 12, borderRadius: 16, border: `1px solid ${C.border}`, background: C.soft, color: C.text, cursor: busy ? "not-allowed" : "pointer", fontWeight: 900 }}>
-            Ingresar
-          </button>
-          <button onClick={signUp} disabled={busy} style={{ flex: 1, padding: 12, borderRadius: 16, border: `1px solid ${C.border}`, background: "transparent", color: C.text, cursor: busy ? "not-allowed" : "pointer", fontWeight: 900 }}>
-            Registrarme
-          </button>
-        </div>
+        <button
+          onClick={register}
+          disabled={busy}
+          style={{
+            padding: 12,
+            borderRadius: 12,
+            border: `1px solid ${C.border}`,
+            background: "transparent",
+            color: C.muted,
+            cursor: "pointer",
+          }}
+        >
+          Registrarme
+        </button>
       </div>
     </main>
   );
