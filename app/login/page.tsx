@@ -12,6 +12,10 @@ export default function LoginPage() {
   const [busy, setBusy] = useState(false);
   const [lang, setLang] = useState<Lang>("es");
 
+  // ✅ nuevos checks
+  const [isAdult, setIsAdult] = useState(false);
+  const [acceptTerms, setAcceptTerms] = useState(false);
+
   const C = {
     bg: "#0b0f17",
     panel: "#0f1626",
@@ -29,6 +33,12 @@ export default function LoginPage() {
       signup: "Registrarme",
       created: "Registro creado — ahora ingresá.",
       missing: "Completá email y contraseña.",
+      termsTitle: "Apto +18",
+      termsLine1: "Confirmo que soy mayor de 18 años.",
+      termsLine2a: "Acepto los",
+      termsLine2b: "Términos y Condiciones",
+      termsLine2c: "y la Política de Privacidad.",
+      needChecks: "Para continuar, confirmá +18 y aceptá términos.",
       errorTitle: "Error",
     },
     pt: {
@@ -38,6 +48,12 @@ export default function LoginPage() {
       signup: "Criar conta",
       created: "Conta criada — agora faça login.",
       missing: "Preencha email e senha.",
+      termsTitle: "Apto 18+",
+      termsLine1: "Confirmo que tenho mais de 18 anos.",
+      termsLine2a: "Aceito os",
+      termsLine2b: "Termos e Condições",
+      termsLine2c: "e a Política de Privacidade.",
+      needChecks: "Para continuar, confirme 18+ e aceite os termos.",
       errorTitle: "Erro",
     },
     en: {
@@ -47,6 +63,12 @@ export default function LoginPage() {
       signup: "Create account",
       created: "Account created — now sign in.",
       missing: "Fill email and password.",
+      termsTitle: "18+ only",
+      termsLine1: "I confirm I’m over 18 years old.",
+      termsLine2a: "I accept the",
+      termsLine2b: "Terms & Conditions",
+      termsLine2c: "and Privacy Policy.",
+      needChecks: "To continue, confirm 18+ and accept terms.",
       errorTitle: "Error",
     },
   }[lang];
@@ -73,50 +95,40 @@ export default function LoginPage() {
     } as const;
   }
 
+  const canContinue = isAdult && acceptTerms && !!email && !!password && !busy;
+
   async function login() {
-    if (!email || !password) {
-      alert(t.missing);
-      return;
-    }
+    if (!email || !password) return alert(t.missing);
+    if (!isAdult || !acceptTerms) return alert(t.needChecks);
+
     setBusy(true);
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
     setBusy(false);
 
-    if (error) {
-      alert(`${t.errorTitle}: ${error.message}`);
-      return;
-    }
+    if (error) return alert(`${t.errorTitle}: ${error.message}`);
 
-    // guardamos el idioma en metadata (no bloquea)
-    await supabase.auth.updateUser({ data: { lang } });
+    // guardamos consentimiento “rápido” en metadata (ledger lo hacemos en Supabase luego)
+    await supabase.auth.updateUser({ data: { lang, is_adult: true, accepted_terms: true } });
 
     window.location.href = "/app";
   }
 
   async function register() {
-    if (!email || !password) {
-      alert(t.missing);
-      return;
-    }
+    if (!email || !password) return alert(t.missing);
+    if (!isAdult || !acceptTerms) return alert(t.needChecks);
+
     setBusy(true);
 
     const { error } = await supabase.auth.signUp({
       email,
       password,
-      options: { data: { lang } },
+      options: { data: { lang, is_adult: true, accepted_terms: true } },
     });
 
     setBusy(false);
 
-    if (error) {
-      alert(`${t.errorTitle}: ${error.message}`);
-      return;
-    }
+    if (error) return alert(`${t.errorTitle}: ${error.message}`);
 
     alert(t.created);
   }
@@ -134,7 +146,8 @@ export default function LoginPage() {
     >
       <div
         style={{
-          width: 380,
+          width: 390,
+          maxWidth: "92vw",
           borderRadius: 20,
           border: `1px solid ${C.border}`,
           background: C.panel,
@@ -144,7 +157,6 @@ export default function LoginPage() {
           gap: 14,
         }}
       >
-        {/* LOGO */}
         <div style={{ display: "grid", placeItems: "center" }}>
           <img src="/auriona-logo.png" alt="Auriona" style={{ width: 220, objectFit: "contain" }} />
         </div>
@@ -154,17 +166,14 @@ export default function LoginPage() {
           <button onClick={() => setLangAndSave("es")} style={flagBtn(lang === "es")} title="Español">
             <img src="/flags/ar.png" width={24} height={24} alt="AR" />
           </button>
-
           <button onClick={() => setLangAndSave("pt")} style={flagBtn(lang === "pt")} title="Português">
             <img src="/flags/br.png" width={24} height={24} alt="BR" />
           </button>
-
           <button onClick={() => setLangAndSave("en")} style={flagBtn(lang === "en")} title="English">
             <img src="/flags/us.png" width={24} height={24} alt="US" />
           </button>
         </div>
 
-        {/* EMAIL */}
         <input
           placeholder={t.email}
           value={email}
@@ -179,7 +188,6 @@ export default function LoginPage() {
           }}
         />
 
-        {/* PASSWORD + OJO */}
         <div style={{ position: "relative" }}>
           <input
             type={showPass ? "text" : "password"}
@@ -196,7 +204,6 @@ export default function LoginPage() {
               outline: "none",
             }}
           />
-
           <button
             onClick={() => setShowPass((v) => !v)}
             type="button"
@@ -218,18 +225,48 @@ export default function LoginPage() {
           </button>
         </div>
 
-        {/* BOTONES */}
+        {/* ✅ +18 + TyC */}
+        <div
+          style={{
+            border: `1px solid ${C.border}`,
+            borderRadius: 14,
+            padding: 12,
+            background: "rgba(255,255,255,0.03)",
+            display: "grid",
+            gap: 10,
+          }}
+        >
+          <div style={{ fontWeight: 900, fontSize: 13, color: C.text }}>{t.termsTitle}</div>
+
+          <label style={{ display: "flex", gap: 10, alignItems: "flex-start", fontSize: 13, color: C.muted }}>
+            <input type="checkbox" checked={isAdult} onChange={(e) => setIsAdult(e.target.checked)} />
+            <span>{t.termsLine1}</span>
+          </label>
+
+          <label style={{ display: "flex", gap: 10, alignItems: "flex-start", fontSize: 13, color: C.muted }}>
+            <input type="checkbox" checked={acceptTerms} onChange={(e) => setAcceptTerms(e.target.checked)} />
+            <span>
+              {t.termsLine2a}{" "}
+              <a href="/terms" target="_blank" style={{ color: C.text, textDecoration: "underline" }}>
+                {t.termsLine2b}
+              </a>{" "}
+              {t.termsLine2c}
+            </span>
+          </label>
+        </div>
+
         <button
           onClick={login}
-          disabled={busy}
+          disabled={!canContinue}
           style={{
             padding: 12,
             borderRadius: 12,
             border: `1px solid ${C.border}`,
-            background: C.soft,
+            background: canContinue ? C.soft : "transparent",
             color: C.text,
             fontWeight: 900,
-            cursor: busy ? "not-allowed" : "pointer",
+            cursor: canContinue ? "pointer" : "not-allowed",
+            opacity: canContinue ? 1 : 0.55,
           }}
         >
           {busy ? "..." : t.login}
@@ -237,15 +274,16 @@ export default function LoginPage() {
 
         <button
           onClick={register}
-          disabled={busy}
+          disabled={!canContinue}
           style={{
             padding: 12,
             borderRadius: 12,
             border: `1px solid ${C.border}`,
             background: "transparent",
             color: C.muted,
-            cursor: busy ? "not-allowed" : "pointer",
+            cursor: canContinue ? "pointer" : "not-allowed",
             fontWeight: 800,
+            opacity: canContinue ? 1 : 0.55,
           }}
         >
           {t.signup}
