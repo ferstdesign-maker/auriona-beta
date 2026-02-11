@@ -127,8 +127,31 @@ export default function AppPage() {
     await loadConversations();
   }
 
+  // ✅ NUEVO: borrar conversación (borra mensajes primero, luego la conversación)
   async function deleteConversation() {
-    // lo hacemos en la mejora 3, por ahora no
+    if (activeConvId === "legacy") return;
+
+    const title = convs.find((c) => c.id === activeConvId)?.title ?? "esta conversación";
+    const ok = window.confirm(`¿Seguro que querés borrar "${title}"?\n\nSe borran también todos sus mensajes.`);
+    if (!ok) return;
+
+    // 1) borrar mensajes de esa conversación
+    const { error: e1 } = await supabase.from("messages").delete().eq("conversation_id", activeConvId);
+    if (e1) {
+      alert("No pude borrar los mensajes: " + e1.message);
+      return;
+    }
+
+    // 2) borrar la conversación
+    const { error: e2 } = await supabase.from("conversations").delete().eq("id", activeConvId);
+    if (e2) {
+      alert("No pude borrar la conversación: " + e2.message);
+      return;
+    }
+
+    // 3) volver a legacy
+    await loadConversations();
+    await loadMessages("legacy");
   }
 
   async function saveMessage(role: "user" | "auri", content: string, convId: string) {
@@ -294,18 +317,34 @@ export default function AppPage() {
             <div>{activeTitle}</div>
 
             {activeConvId !== "legacy" && (
-              <button
-                onClick={renameConversation}
-                style={{
-                  padding: "6px 10px",
-                  borderRadius: 10,
-                  border: "1px solid #e5e7eb",
-                  cursor: "pointer",
-                  fontWeight: 600,
-                }}
-              >
-                ✏️ Renombrar
-              </button>
+              <>
+                <button
+                  onClick={renameConversation}
+                  style={{
+                    padding: "6px 10px",
+                    borderRadius: 10,
+                    border: "1px solid #e5e7eb",
+                    cursor: "pointer",
+                    fontWeight: 600,
+                  }}
+                >
+                  ✏️ Renombrar
+                </button>
+
+                <button
+                  onClick={deleteConversation}
+                  style={{
+                    padding: "6px 10px",
+                    borderRadius: 10,
+                    border: "1px solid #e5e7eb",
+                    cursor: "pointer",
+                    fontWeight: 700,
+                  }}
+                  title="Borrar conversación"
+                >
+                  🗑 Borrar
+                </button>
+              </>
             )}
           </div>
 
