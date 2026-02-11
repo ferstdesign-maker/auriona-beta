@@ -30,20 +30,16 @@ export default function AppPage() {
 
   const [loc, setLoc] = useState<LocationState>({ lat: null, lon: null });
 
-  // responsive
   const [isMobile, setIsMobile] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
 
-  // ✅ teclado (Android): cuánto “sube” el footer
   const [kbOffset, setKbOffset] = useState(0);
 
-  // ✅ medir alturas reales
   const headerRef = useRef<HTMLDivElement | null>(null);
   const footerRef = useRef<HTMLDivElement | null>(null);
   const [headerH, setHeaderH] = useState(64);
   const [footerH, setFooterH] = useState(90);
 
-  const scrollerRef = useRef<HTMLDivElement | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
   const title = useMemo(() => "Auriona", []);
@@ -92,13 +88,11 @@ export default function AppPage() {
     setFooterH(fh);
   }
 
-  // init stored data
   useEffect(() => {
     setLang(getStoredLang());
     setLoc(getStoredLoc());
   }, []);
 
-  // detect mobile + resize
   useEffect(() => {
     function onResize() {
       const m = window.innerWidth < 900;
@@ -113,7 +107,7 @@ export default function AppPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ✅ Android keyboard handler (visualViewport)
+  // ✅ teclado Android
   useEffect(() => {
     function updateKeyboardOffset() {
       const vv = window.visualViewport;
@@ -121,10 +115,8 @@ export default function AppPage() {
         setKbOffset(0);
         return;
       }
-      // cuánto “recorta” el teclado al viewport visible
       const offset = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
       setKbOffset(offset);
-      // al aparecer teclado, mantenemos el final visible
       setTimeout(() => scrollToBottom(true), 30);
       setTimeout(() => measureBars(), 30);
     }
@@ -133,7 +125,7 @@ export default function AppPage() {
     if (!vv) return;
 
     vv.addEventListener("resize", updateKeyboardOffset);
-    vv.addEventListener("scroll", updateKeyboardOffset); // algunos android lo disparan así
+    vv.addEventListener("scroll", updateKeyboardOffset);
     updateKeyboardOffset();
 
     return () => {
@@ -143,13 +135,11 @@ export default function AppPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // re-medimos barras cuando cambia input (puede crecer)
   useEffect(() => {
     measureBars();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [input, showMenu, isMobile]);
 
-  // auth + load
   useEffect(() => {
     (async () => {
       const { data } = await supabase.auth.getUser();
@@ -174,13 +164,12 @@ export default function AppPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // scroll al final cuando llegan mensajes
   useEffect(() => {
     scrollToBottom(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [msgs]);
 
-  // speech recognition init
+  // ✅ SpeechRecognition init
   useEffect(() => {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) return;
@@ -192,19 +181,12 @@ export default function AppPage() {
 
     rec.onresult = (event: any) => {
       let finalText = "";
-      let interim = "";
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const t = event.results[i][0].transcript;
         if (event.results[i].isFinal) finalText += t;
-        else interim += t;
       }
-      setInput((prev) => {
-        const base = prev.trim();
-        const add = (finalText || interim).trim();
-        if (!add) return prev;
-        if (!base) return add;
-        return base + " " + add;
-      });
+      const add = finalText.trim();
+      if (add) setInput((prev) => (prev ? prev + " " + add : add));
     };
 
     rec.onerror = () => setListening(false);
@@ -212,22 +194,43 @@ export default function AppPage() {
     recRef.current = rec;
   }, [lang]);
 
+  // ✅ Voz: preferir es-AR y voz femenina si existe
   function speak(text: string) {
     try {
       if (!autoSpeak) return;
       if (typeof window === "undefined") return;
       if (!("speechSynthesis" in window)) return;
 
+      const targetLang = lang === "pt" ? "pt-BR" : lang === "en" ? "en-US" : "es-AR";
       window.speechSynthesis.cancel();
+
       const u = new SpeechSynthesisUtterance(text);
-      u.lang = lang === "pt" ? "pt-BR" : lang === "en" ? "en-US" : "es-AR";
-      const voices = window.speechSynthesis.getVoices?.() || [];
-      const preferred =
-        voices.find((v) => v.lang.toLowerCase() === u.lang.toLowerCase()) ||
-        voices.find((v) => v.lang.toLowerCase().startsWith(u.lang.slice(0, 2).toLowerCase()));
-      if (preferred) u.voice = preferred;
+      u.lang = targetLang;
       u.rate = 1.02;
-      u.pitch = 1.02;
+      u.pitch = 1.03;
+
+      const voices = window.speechSynthesis.getVoices?.() || [];
+      const lower = (s: string) => (s || "").toLowerCase();
+
+      const isFemaleName = (name: string) => {
+        const n = lower(name);
+        return n.includes("female") || n.includes("mujer") || n.includes("woman") || n.includes("paulina") || n.includes("sofia") || n.includes("lucia");
+      };
+
+      // 1) es-AR female
+      let v =
+        voices.find((x) => lower(x.lang) === "es-ar" && isFemaleName(x.name)) ||
+        // 2) es-AR cualquiera
+        voices.find((x) => lower(x.lang) === "es-ar") ||
+        // 3) es-* female
+        voices.find((x) => lower(x.lang).startsWith("es") && isFemaleName(x.name)) ||
+        // 4) es-* cualquiera
+        voices.find((x) => lower(x.lang).startsWith("es")) ||
+        // 5) cualquier female
+        voices.find((x) => isFemaleName(x.name));
+
+      if (v) u.voice = v;
+
       window.speechSynthesis.speak(u);
     } catch {}
   }
@@ -238,7 +241,7 @@ export default function AppPage() {
       .select("role, content, created_at")
       .is("conversation_id", null)
       .order("created_at", { ascending: true })
-      .limit(350);
+      .limit(250);
 
     if (error) {
       setMsgs([{ role: "auri", text: `No pude cargar el historial: ${error.message}` }]);
@@ -248,10 +251,10 @@ export default function AppPage() {
     if (!rows || rows.length === 0) {
       const hello =
         lang === "en"
-          ? `Hi ${callUser}. I'm ${callAssistant}. Shall we start?`
+          ? `Hi ${callUser}. I'm ${callAssistant}.`
           : lang === "pt"
-          ? `Oi ${callUser}. Eu sou ${callAssistant}. Vamos começar?`
-          : `Hola ${callUser}. Soy ${callAssistant}. ¿Arrancamos?`;
+          ? `Oi ${callUser}. Eu sou ${callAssistant}.`
+          : `Hola ${callUser}. Soy ${callAssistant}.`;
       setMsgs([{ role: "auri", text: hello }]);
       return;
     }
@@ -272,7 +275,7 @@ export default function AppPage() {
   }
 
   async function clearConversation() {
-    const ok = window.confirm(lang === "en" ? "Delete full history?" : lang === "pt" ? "Apagar histórico?" : "¿Borrar historial?");
+    const ok = window.confirm("¿Borrar historial?");
     if (!ok) return;
 
     const { data } = await supabase.auth.getUser();
@@ -289,39 +292,40 @@ export default function AppPage() {
       return;
     }
 
-    const txt = lang === "en" ? `Done ${callUser}.` : lang === "pt" ? `Pronto ${callUser}.` : `Listo ${callUser}.`;
+    const txt = `Listo ${callUser}. Empezamos de cero.`;
     setMsgs([{ role: "auri", text: txt }]);
     speak(txt);
     setShowMenu(false);
     setTimeout(() => scrollToBottom(true), 50);
   }
 
-  function micStart() {
+  // ✅ Mic: tap ON/OFF (más estable que “mantener apretado”)
+  function toggleMic() {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR || !recRef.current) {
-      alert(lang === "en" ? "Dictation not supported." : "Dictado no soportado.");
+      alert("Tu navegador no soporta dictado. Probá Chrome (Android) o Edge.");
       return;
     }
-    if (listening) return;
-    setListening(true);
-    try {
-      recRef.current.start();
-    } catch {
+
+    if (!listening) {
+      setListening(true);
+      try {
+        recRef.current.start();
+      } catch {
+        setListening(false);
+        alert("No pude iniciar el mic. Revisá permisos de micrófono del navegador.");
+      }
+    } else {
+      try {
+        recRef.current.stop();
+      } catch {}
       setListening(false);
     }
   }
 
-  function micStop() {
-    if (!listening) return;
-    try {
-      recRef.current.stop();
-    } catch {}
-    setListening(false);
-  }
-
   function useMyLocation() {
     if (!navigator.geolocation) {
-      alert(lang === "en" ? "Geolocation not available." : "Geolocalización no disponible.");
+      alert("Geolocalización no disponible.");
       return;
     }
 
@@ -332,7 +336,7 @@ export default function AppPage() {
         storeLoc(next);
         setShowMenu(false);
       },
-      () => alert(lang === "en" ? "Location denied." : "Ubicación denegada."),
+      () => alert("Permiso de ubicación denegado."),
       { enableHighAccuracy: true, timeout: 12000 }
     );
   }
@@ -366,7 +370,7 @@ export default function AppPage() {
       speak(reply);
       setTimeout(() => scrollToBottom(true), 40);
     } catch {
-      const fallback = lang === "en" ? "Connection problem." : "Problema de conexión.";
+      const fallback = "Tuve un problema de conexión.";
       setMsgs((m) => [...m, { role: "auri", text: fallback }]);
       await saveMessage("auri", fallback);
       speak(fallback);
@@ -393,7 +397,6 @@ export default function AppPage() {
     fontSize: 13,
   };
 
-  // ✅ fijos: header arriba, footer abajo (y footer sube con kbOffset)
   const fixedHeaderStyle: React.CSSProperties = {
     position: "fixed",
     top: 0,
@@ -413,7 +416,7 @@ export default function AppPage() {
     position: "fixed",
     left: isMobile ? 0 : 320,
     right: 0,
-    bottom: kbOffset, // ✅ se sube cuando aparece teclado
+    bottom: kbOffset,
     zIndex: 60,
     padding: isMobile ? 10 : 16,
     borderTop: `1px solid ${C.border}`,
@@ -423,14 +426,12 @@ export default function AppPage() {
     alignItems: "center",
   };
 
-  // ✅ área scroll: ocupa todo entre header y footer (más teclado)
   const contentTop = headerH;
   const contentBottom = footerH + kbOffset;
 
   return (
     <main style={{ height: "100vh", background: C.bg, color: C.text, overflow: "hidden" }}>
       <div style={{ height: "100%", display: "flex" }}>
-        {/* Sidebar desktop */}
         {!isMobile && (
           <aside
             style={{
@@ -461,16 +462,6 @@ export default function AppPage() {
               📍 Usar mi ubicación
             </button>
 
-            <div style={{ fontSize: 12, color: C.muted }}>
-              {loc.lat != null && loc.lon != null ? (
-                <>
-                  Ubicación lista: {loc.lat.toFixed(3)}, {loc.lon.toFixed(3)}
-                </>
-              ) : (
-                <>Ubicación: sin configurar</>
-              )}
-            </div>
-
             <button onClick={() => setAutoSpeak((v) => !v)} style={topBtnStyle}>
               🔊 Voz: {autoSpeak ? "ON" : "OFF"}
             </button>
@@ -479,7 +470,6 @@ export default function AppPage() {
               <button onClick={clearConversation} style={topBtnStyle}>
                 Borrar historial
               </button>
-
               <button onClick={signOut} style={topBtnStyle}>
                 Cerrar sesión
               </button>
@@ -487,9 +477,7 @@ export default function AppPage() {
           </aside>
         )}
 
-        {/* Main column */}
         <section style={{ flex: 1, minWidth: 0 }}>
-          {/* ✅ HEADER FIXED */}
           <div ref={headerRef} style={fixedHeaderStyle}>
             {isMobile ? (
               <>
@@ -497,7 +485,6 @@ export default function AppPage() {
                   ☰
                 </button>
 
-                {/* logo centrado */}
                 <div style={{ display: "flex", justifyContent: "center", flex: 1 }}>
                   <img src="/auriona-logo.png" alt="Auriona" style={{ width: 210, height: 48, objectFit: "contain" }} />
                 </div>
@@ -512,7 +499,6 @@ export default function AppPage() {
             )}
           </div>
 
-          {/* ✅ MENU móvil (debajo del header, dentro del flujo scroll para no tapar) */}
           {isMobile && showMenu && (
             <div
               style={{
@@ -531,37 +517,22 @@ export default function AppPage() {
               <button onClick={useMyLocation} style={topBtnStyle}>
                 📍 Usar mi ubicación
               </button>
-
-              <div style={{ fontSize: 12, color: C.muted }}>
-                {loc.lat != null && loc.lon != null ? (
-                  <>
-                    Ubicación lista: {loc.lat.toFixed(3)}, {loc.lon.toFixed(3)}
-                  </>
-                ) : (
-                  <>Ubicación: sin configurar</>
-                )}
-              </div>
-
               <button onClick={() => setAutoSpeak((v) => !v)} style={topBtnStyle}>
                 🔊 Voz: {autoSpeak ? "ON" : "OFF"}
               </button>
-
               <button onClick={clearConversation} style={topBtnStyle}>
                 Borrar historial
               </button>
-
               <button onClick={signOut} style={topBtnStyle}>
                 Cerrar sesión
               </button>
             </div>
           )}
 
-          {/* ✅ SCROLLER (entre header y footer) */}
           <div
-            ref={scrollerRef}
             style={{
               position: "absolute",
-              top: contentTop + (isMobile && showMenu ? 230 : 0), // menu ocupa altura aprox; simplificado
+              top: contentTop + (isMobile && showMenu ? 230 : 0),
               left: isMobile ? 0 : 320,
               right: 0,
               bottom: contentBottom,
@@ -594,48 +565,12 @@ export default function AppPage() {
             <div ref={bottomRef} />
           </div>
 
-          {/* ✅ FOOTER FIXED (y sube con el teclado) */}
           <div ref={footerRef} style={fixedFooterStyle}>
-            <button
-              onPointerDown={(e) => {
-                e.preventDefault();
-                micStart();
-              }}
-              onPointerUp={(e) => {
-                e.preventDefault();
-                micStop();
-              }}
-              onPointerCancel={(e) => {
-                e.preventDefault();
-                micStop();
-              }}
-              onPointerLeave={(e) => {
-                e.preventDefault();
-                micStop();
-              }}
-              style={{
-                padding: "12px 14px",
-                borderRadius: 14,
-                border: `1px solid ${C.border}`,
-                background: listening ? "rgba(255,255,255,0.10)" : "transparent",
-                color: C.text,
-                cursor: "pointer",
-                fontWeight: 900,
-                minWidth: 54,
-                userSelect: "none",
-                touchAction: "none",
-                flex: "0 0 auto",
-              }}
-              title="Mantener apretado para hablar"
-            >
-              {listening ? "🎙️" : "🎤"}
-            </button>
-
             <input
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onFocus={() => setTimeout(() => scrollToBottom(true), 40)}
-              placeholder={lang === "en" ? "Type or hold the mic…" : lang === "pt" ? "Digite ou segure o microfone…" : "Escribí o mantené apretado el mic…"}
+              placeholder={"Escribí…"}
               onKeyDown={(e) => e.key === "Enter" && send()}
               style={{
                 flex: 1,
@@ -648,6 +583,25 @@ export default function AppPage() {
                 outline: "none",
               }}
             />
+
+            {/* ✅ Mic a la derecha */}
+            <button
+              onClick={toggleMic}
+              style={{
+                padding: "12px 14px",
+                borderRadius: 14,
+                border: `1px solid ${C.border}`,
+                background: listening ? "rgba(255,255,255,0.10)" : "transparent",
+                color: C.text,
+                cursor: "pointer",
+                fontWeight: 900,
+                minWidth: 54,
+                flex: "0 0 auto",
+              }}
+              title={listening ? "Tocar para detener" : "Tocar para dictar"}
+            >
+              {listening ? "🎙️" : "🎤"}
+            </button>
 
             <button
               onClick={send}
@@ -664,7 +618,7 @@ export default function AppPage() {
                 flex: "0 0 auto",
               }}
             >
-              {busy ? "..." : lang === "en" ? "Send" : "Enviar"}
+              {busy ? "..." : "Enviar"}
             </button>
           </div>
         </section>

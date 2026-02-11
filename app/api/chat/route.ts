@@ -22,39 +22,33 @@ function needsWeb(message: string) {
     "abierto",
     "cerrado",
     "dónde",
+    "direccion",
     "dirección",
     "teléfono",
+    "telefono",
     "comprar",
     "local",
-    "helado",
+    "cerca",
     "trelew",
+    "helado",
+    "farmacia",
+    "hospital",
   ];
   return triggers.some((t) => m.includes(t));
 }
 
 async function createResponseWithFallback(params: any) {
-  // Intentamos en orden. Si un modelo no existe en tu cuenta, probamos otro.
   const preferred = process.env.OPENAI_MODEL?.trim();
-  const models = [
-    preferred,
-    "gpt-5",
-    "gpt-5-mini",
-    "gpt-4o-mini",
-    "gpt-4.1-mini",
-  ].filter(Boolean);
+  const models = [preferred, "gpt-5", "gpt-5-mini", "gpt-4o-mini", "gpt-4.1-mini"].filter(Boolean);
 
   let lastErr: any = null;
-
   for (const model of models) {
     try {
-      const resp = await client.responses.create({ ...params, model });
-      return resp;
+      return await client.responses.create({ ...params, model });
     } catch (e: any) {
       lastErr = e;
-      // seguimos probando
     }
   }
-
   throw lastErr;
 }
 
@@ -68,12 +62,19 @@ export async function POST(req: Request) {
     const profile = body.profile ?? {};
     const location = body.location ?? {};
 
+    // ✅ Estilo “Auri”: corto + progresivo
     const system = `
-Sos Auriona (Auri). Tono: cálido, simple y útil.
-Reglas importantes:
-- Si la consulta necesita datos actuales/locales (ej: lugares, horarios, clima, precios), intentá usar web search.
-- No inventes. Si no encontrás, decí “No pude confirmarlo” y pedí 1 dato puntual o proponé alternativa.
-- Salud: no diagnostiques. Para dolor de rodilla, da consejos generales seguros y sugerí consulta profesional si hay señales de alarma.
+Sos Auriona ("Auri"). Tono: cálido, rioplatense, mujer, cercano, sin exagerar.
+Formato obligatorio:
+- Máximo 6 líneas.
+- Si el usuario pide lugares/recomendaciones: primero listá SOLO nombres (3–6) y preguntá cuál prefiere o qué zona.
+- NO pongas direcciones, teléfonos, horarios, ratings, precios, ni links en el primer mensaje.
+- Si el usuario también mete un tema de salud en la misma pregunta:
+  - respondé en 2 partes: (1) lugares (corto) + (2) consejos generales seguros (corto)
+  - sin diagnosticar. Indicá “señales de alarma” y sugerí consulta profesional si aplica.
+Web:
+- Si necesita datos actuales/locales, usá web search. Si no encontrás, decí “no pude confirmarlo” y pedí 1 dato.
+No uses markdown pesado (no guiones bajos, no listas largas). Nada de “Cerrado · 4.5 (X reseñas)”.
 Idioma: ${lang}
 Nombre del usuario: ${profile.callUser ?? "amiga/o"}
 Tu nombre: ${profile.callAssistant ?? "Auri"}
@@ -92,16 +93,14 @@ Ubicación (si hay): lat=${location.lat ?? "?"}, lon=${location.lon ?? "?"}
 
     const params: any = {
       input: messages,
-      temperature: 0.6,
+      temperature: 0.5,
       store: false,
+      max_output_tokens: 220, // ✅ evita biblias
     };
 
-    // ✅ Solo si hace falta: habilitamos web_search
     if (useWeb) {
       params.tools = [{ type: "web_search" }];
       params.tool_choice = "auto";
-      // opcional: si querés ver fuentes completas algún día:
-      // params.include = ["web_search_call.action.sources"];
     }
 
     const resp = await createResponseWithFallback(params);
@@ -111,21 +110,9 @@ Ubicación (si hay): lat=${location.lat ?? "?"}, lon=${location.lon ?? "?"}
 
     return NextResponse.json({ reply, used_web: useWeb });
   } catch (e: any) {
-    // ✅ MUY IMPORTANTE: devolvemos el error real para debug
     const status = e?.status || 500;
-    const msg =
-      e?.message ||
-      e?.error?.message ||
-      (typeof e === "string" ? e : "Unknown error");
-
+    const msg = e?.message || e?.error?.message || (typeof e === "string" ? e : "Unknown error");
     console.error("API /chat error:", e);
-
-    return NextResponse.json(
-      {
-        reply: "Error de servidor. Probá de nuevo.",
-        debug: String(msg),
-      },
-      { status }
-    );
+    return NextResponse.json({ reply: "Error de servidor. Probá de nuevo.", debug: String(msg) }, { status });
   }
 }
