@@ -5,7 +5,7 @@ import { supabase } from "../../lib/supabase";
 
 type Msg = { role: "user" | "auri"; text: string };
 type Lang = "es" | "pt" | "en";
-type LocationState = { lat: number | null; lon: number | null; city?: string; label?: string };
+type LocationState = { lat: number | null; lon: number | null };
 
 declare global {
   interface Window {
@@ -18,7 +18,6 @@ export default function AppPage() {
   const [busy, setBusy] = useState(false);
   const [input, setInput] = useState("");
   const [msgs, setMsgs] = useState<Msg[]>([]);
-  const bottomRef = useRef<HTMLDivElement | null>(null);
 
   const [callUser, setCallUser] = useState("amiga/o");
   const [callAssistant, setCallAssistant] = useState("Auri");
@@ -31,9 +30,9 @@ export default function AppPage() {
 
   const [loc, setLoc] = useState<LocationState>({ lat: null, lon: null });
 
-  // ✅ responsive
+  // responsive
   const [isMobile, setIsMobile] = useState(false);
-  const [showMenu, setShowMenu] = useState(false); // panel lateral en mobile
+  const [showMenu, setShowMenu] = useState(false);
 
   const title = useMemo(() => "Auriona", []);
 
@@ -47,6 +46,14 @@ export default function AppPage() {
     soft: "rgba(255,255,255,0.06)",
   };
 
+  // refs para scroll y tamaños
+  const scrollerRef = useRef<HTMLDivElement | null>(null);
+  const bottomRef = useRef<HTMLDivElement | null>(null);
+  const footerRef = useRef<HTMLDivElement | null>(null);
+
+  // padding inferior del chat (para que no lo tape el footer)
+  const [bottomPad, setBottomPad] = useState(120);
+
   function getStoredLang(): Lang {
     const v = (typeof window !== "undefined" && localStorage.getItem("auri_lang")) || "es";
     if (v === "pt" || v === "en" || v === "es") return v;
@@ -59,9 +66,7 @@ export default function AppPage() {
     if (!raw) return { lat: null, lon: null };
     try {
       const j = JSON.parse(raw);
-      const lat = typeof j.lat === "number" ? j.lat : null;
-      const lon = typeof j.lon === "number" ? j.lon : null;
-      return { lat, lon };
+      return { lat: typeof j.lat === "number" ? j.lat : null, lon: typeof j.lon === "number" ? j.lon : null };
     } catch {
       return { lat: null, lon: null };
     }
@@ -69,25 +74,39 @@ export default function AppPage() {
 
   function storeLoc(next: LocationState) {
     if (typeof window === "undefined") return;
-    localStorage.setItem("auri_loc", JSON.stringify({ lat: next.lat, lon: next.lon }));
+    localStorage.setItem("auri_loc", JSON.stringify(next));
   }
 
+  // init stored lang/loc
   useEffect(() => {
     setLang(getStoredLang());
     setLoc(getStoredLoc());
   }, []);
 
-  // ✅ detectar mobile (por ancho)
+  // detect mobile + resize
   useEffect(() => {
     function onResize() {
-      setIsMobile(window.innerWidth < 900);
-      if (window.innerWidth >= 900) setShowMenu(false);
+      const m = window.innerWidth < 900;
+      setIsMobile(m);
+      if (!m) setShowMenu(false);
+      measureFooter();
+      // al resize (incluye teclado en algunos browsers), bajamos al final
+      scrollToBottom(true);
     }
-    onResize();
+
     window.addEventListener("resize", onResize);
+    onResize();
     return () => window.removeEventListener("resize", onResize);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // cuando cambia el texto del input, puede cambiar el footer height en móviles
+  useEffect(() => {
+    measureFooter();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [input, isMobile, showMenu]);
+
+  // auth + load
   useEffect(() => {
     (async () => {
       const { data } = await supabase.auth.getUser();
@@ -107,15 +126,31 @@ export default function AppPage() {
       }
 
       await loadMainConversation();
+      // al cargar, al final
+      setTimeout(() => scrollToBottom(true), 50);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // scroll al final cuando llegan mensajes
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    scrollToBottom(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [msgs]);
 
-  // SpeechRecognition init
+  function measureFooter() {
+    const h = footerRef.current?.getBoundingClientRect?.().height ?? 96;
+    // 18 extra para “aire”
+    setBottomPad(Math.ceil(h + 18));
+  }
+
+  function scrollToBottom(instant: boolean) {
+    // usa anchor al final
+    if (!bottomRef.current) return;
+    bottomRef.current.scrollIntoView({ behavior: instant ? "auto" : "smooth", block: "end" });
+  }
+
+  // speech recognition init
   useEffect(() => {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) return;
@@ -212,13 +247,7 @@ export default function AppPage() {
   }
 
   async function clearConversation() {
-    const ok = window.confirm(
-      lang === "en"
-        ? "Delete the full history?"
-        : lang === "pt"
-        ? "Apagar todo o histórico?"
-        : "¿Borrar todo el historial?"
-    );
+    const ok = window.confirm(lang === "en" ? "Delete the full history?" : lang === "pt" ? "Apagar todo o histórico?" : "¿Borrar todo el historial?");
     if (!ok) return;
 
     const { data } = await supabase.auth.getUser();
@@ -245,6 +274,7 @@ export default function AppPage() {
     setMsgs([{ role: "auri", text: txt }]);
     speak(txt);
     setShowMenu(false);
+    setTimeout(() => scrollToBottom(true), 50);
   }
 
   function micStart() {
@@ -270,7 +300,7 @@ export default function AppPage() {
     setListening(false);
   }
 
-  async function useMyLocation() {
+  function useMyLocation() {
     if (typeof navigator === "undefined" || !navigator.geolocation) {
       alert(lang === "en" ? "Geolocation not available." : "Geolocalización no disponible.");
       return;
@@ -309,13 +339,7 @@ export default function AppPage() {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: text,
-          history,
-          lang,
-          location: loc,
-          profile: { callUser, callAssistant },
-        }),
+        body: JSON.stringify({ message: text, history, lang, location: loc, profile: { callUser, callAssistant } }),
       });
 
       const data = await res.json();
@@ -324,11 +348,14 @@ export default function AppPage() {
       setMsgs((m) => [...m, { role: "auri", text: reply }]);
       await saveMessage("auri", reply);
       speak(reply);
+
+      setTimeout(() => scrollToBottom(false), 50);
     } catch {
       const fallback = lang === "en" ? "Connection problem." : lang === "pt" ? "Problema de conexão." : "Tuve un problema de conexión.";
       setMsgs((m) => [...m, { role: "auri", text: fallback }]);
       await saveMessage("auri", fallback);
       speak(fallback);
+      setTimeout(() => scrollToBottom(false), 50);
     } finally {
       setBusy(false);
     }
@@ -339,13 +366,8 @@ export default function AppPage() {
     window.location.href = "/login";
   }
 
-  // ✅ tamaños consistentes (no se “quintuplica”)
-  const logoStyle = isMobile
-    ? { width: 190, height: 48, objectFit: "contain" as const }
-    : { width: 240, height: 60, objectFit: "contain" as const };
-
   const topBtnStyle = {
-    padding: isMobile ? "10px 12px" : "10px 12px",
+    padding: "10px 12px",
     borderRadius: 12,
     border: `1px solid ${C.border}`,
     background: "transparent",
@@ -356,11 +378,25 @@ export default function AppPage() {
     fontSize: 13,
   };
 
+  // ✅ logo centrado siempre en mobile
+  const headerCenterLogo = (
+    <div style={{ display: "flex", justifyContent: "center", alignItems: "center", flex: 1 }}>
+      <img src="/auriona-logo.png" alt="Auriona" style={{ width: isMobile ? 210 : 240, height: isMobile ? 48 : 60, objectFit: "contain" }} />
+    </div>
+  );
+
   return (
-    <main style={{ height: "100vh", background: C.bg, color: C.text }}>
-      {/* Layout: desktop con sidebar, mobile sin sidebar */}
+    <main
+      style={{
+        // ✅ 100dvh mejora con teclado móvil
+        height: "100dvh",
+        background: C.bg,
+        color: C.text,
+        overflow: "hidden",
+      }}
+    >
       <div style={{ height: "100%", display: "flex" }}>
-        {/* Sidebar (solo desktop) */}
+        {/* Sidebar desktop */}
         {!isMobile && (
           <aside
             style={{
@@ -387,7 +423,7 @@ export default function AppPage() {
               <img src="/auriona-logo.png" alt="Auriona" style={{ width: "100%", maxWidth: 240, height: 70, objectFit: "contain" }} />
             </div>
 
-            <button onClick={useMyLocation} style={topBtnStyle} title="Usar mi ubicación">
+            <button onClick={useMyLocation} style={topBtnStyle}>
               📍 Usar mi ubicación
             </button>
 
@@ -401,7 +437,7 @@ export default function AppPage() {
               )}
             </div>
 
-            <button onClick={() => setAutoSpeak((v) => !v)} style={topBtnStyle} title="Voz">
+            <button onClick={() => setAutoSpeak((v) => !v)} style={topBtnStyle}>
               🔊 Voz: {autoSpeak ? "ON" : "OFF"}
             </button>
 
@@ -419,45 +455,42 @@ export default function AppPage() {
 
         {/* Main */}
         <section style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
-          {/* Header responsive */}
+          {/* ✅ Header sticky siempre visible */}
           <header
             style={{
+              position: "sticky",
+              top: 0,
+              zIndex: 50,
               padding: isMobile ? "10px 12px" : 14,
               borderBottom: `1px solid ${C.border}`,
               display: "flex",
               alignItems: "center",
-              justifyContent: "space-between",
               gap: 10,
-              background: "rgba(11,15,23,0.7)",
+              background: "rgba(11,15,23,0.92)",
               backdropFilter: "blur(8px)",
             }}
           >
-            {/* Left: menu en mobile */}
-            <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-              {isMobile && (
+            {isMobile ? (
+              <>
                 <button onClick={() => setShowMenu((v) => !v)} style={topBtnStyle} aria-label="Menu">
                   ☰
                 </button>
-              )}
 
-              <img src="/auriona-logo.png" alt="Auriona" style={logoStyle} />
-            </div>
+                {headerCenterLogo}
 
-            {/* Right: acciones (desktop solo muestra Beta) */}
-            <div style={{ fontSize: 12, color: C.muted, whiteSpace: "nowrap" }}>Beta</div>
+                <div style={{ width: 44 }} /> {/* espaciador para centrar logo */}
+              </>
+            ) : (
+              <>
+                <div style={{ fontWeight: 900 }}>{title}</div>
+                <div style={{ marginLeft: "auto", fontSize: 12, color: C.muted }}>Beta</div>
+              </>
+            )}
           </header>
 
-          {/* Panel móvil (cuando abre ☰) */}
+          {/* Menú móvil desplegable */}
           {isMobile && showMenu && (
-            <div
-              style={{
-                borderBottom: `1px solid ${C.border}`,
-                background: C.panel,
-                padding: 12,
-                display: "grid",
-                gap: 10,
-              }}
-            >
+            <div style={{ borderBottom: `1px solid ${C.border}`, background: C.panel, padding: 12, display: "grid", gap: 10 }}>
               <button onClick={useMyLocation} style={topBtnStyle}>
                 📍 Usar mi ubicación
               </button>
@@ -486,13 +519,16 @@ export default function AppPage() {
             </div>
           )}
 
-          {/* Messages area */}
+          {/* ✅ Scroller (chat) con padding inferior dinámico para que teclado/footer no tape */}
           <div
+            ref={scrollerRef}
             style={{
               flex: 1,
-              padding: isMobile ? 12 : 18,
               overflowY: "auto",
+              padding: isMobile ? 12 : 18,
+              paddingBottom: bottomPad,
               minWidth: 0,
+              WebkitOverflowScrolling: "touch",
             }}
           >
             {msgs.map((m, i) => {
@@ -519,14 +555,18 @@ export default function AppPage() {
             <div ref={bottomRef} />
           </div>
 
-          {/* Footer input */}
-          <footer
+          {/* ✅ Footer sticky: siempre visible; no tapa el chat porque el scroller tiene paddingBottom */}
+          <div
+            ref={footerRef}
             style={{
+              position: "sticky",
+              bottom: 0,
+              zIndex: 60,
               padding: isMobile ? 10 : 16,
               borderTop: `1px solid ${C.border}`,
               display: "flex",
               gap: 10,
-              background: C.panel,
+              background: "rgba(15,22,38,0.98)",
               alignItems: "center",
             }}
           >
@@ -568,6 +608,7 @@ export default function AppPage() {
             <input
               value={input}
               onChange={(e) => setInput(e.target.value)}
+              onFocus={() => setTimeout(() => scrollToBottom(true), 80)} // ✅ cuando abre teclado
               placeholder={lang === "en" ? "Type or hold the mic…" : lang === "pt" ? "Digite ou segure o microfone…" : "Escribí o mantené apretado el mic…"}
               onKeyDown={(e) => e.key === "Enter" && send()}
               style={{
@@ -599,7 +640,7 @@ export default function AppPage() {
             >
               {busy ? "..." : lang === "en" ? "Send" : "Enviar"}
             </button>
-          </footer>
+          </div>
         </section>
       </div>
     </main>
