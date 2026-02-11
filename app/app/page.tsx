@@ -127,7 +127,6 @@ export default function AppPage() {
     await loadConversations();
   }
 
-  // ✅ BORRADO REAL + ERRORES VISIBLES
   async function deleteConversation() {
     if (activeConvId === "legacy") return;
 
@@ -135,14 +134,12 @@ export default function AppPage() {
     const ok = window.confirm(`¿Seguro que querés borrar "${title}"?\n\nSe borran también todos sus mensajes.`);
     if (!ok) return;
 
-    // 1) borrar mensajes
     const { error: e1 } = await supabase.from("messages").delete().eq("conversation_id", activeConvId);
     if (e1) {
-      alert("No pude borrar mensajes (RLS o permisos): " + e1.message);
+      alert("No pude borrar mensajes: " + e1.message);
       return;
     }
 
-    // 2) borrar conversación (con select para saber si realmente borró)
     const { data: deleted, error: e2 } = await supabase
       .from("conversations")
       .delete()
@@ -150,16 +147,14 @@ export default function AppPage() {
       .select("id");
 
     if (e2) {
-      alert("No pude borrar conversación (RLS o permisos): " + e2.message);
+      alert("No pude borrar conversación: " + e2.message);
       return;
     }
-
     if (!deleted || deleted.length === 0) {
-      alert("Supabase NO borró la conversación. Casi seguro falta la policy de DELETE (RLS).");
+      alert("No se borró (probable RLS).");
       return;
     }
 
-    // 3) volver a legacy
     await loadConversations();
     await loadMessages("legacy");
   }
@@ -215,7 +210,6 @@ export default function AppPage() {
     setBusy(true);
 
     await saveMessage("user", text, convId);
-
     if (looksEmpty) autoTitleConversationIfNeeded(text, convId);
 
     try {
@@ -244,38 +238,76 @@ export default function AppPage() {
     }
   }
 
+  // 🎨 PALETA OSCURA
+  const C = {
+    bg: "#0b0f17",
+    panel: "#0f1626",
+    panel2: "#0c1322",
+    border: "rgba(255,255,255,0.10)",
+    text: "rgba(255,255,255,0.92)",
+    muted: "rgba(255,255,255,0.65)",
+    soft: "rgba(255,255,255,0.08)",
+    pill: "rgba(255,255,255,0.10)",
+  };
+
   return (
-    <main style={{ height: "100vh", display: "flex" }}>
+    <main style={{ height: "100vh", display: "flex", background: C.bg, color: C.text }}>
       <aside
         style={{
-          width: 300,
-          borderRight: "1px solid #e5e7eb",
-          padding: 12,
+          width: 320,
+          borderRight: `1px solid ${C.border}`,
+          padding: 14,
           display: "flex",
           flexDirection: "column",
-          gap: 10,
+          gap: 12,
+          background: C.panel,
         }}
       >
-        <div>
-          <div style={{ fontWeight: 800 }}>Auriona</div>
-          <div style={{ fontSize: 12, opacity: 0.75 }}>{email}</div>
-          <div style={{ fontSize: 11, opacity: 0.6 }}>userId: {userId.slice(0, 8)}…</div>
+        {/* LOGO + NOMBRE */}
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <img
+            src="/auriona-logo.png"
+            alt="Auriona"
+            style={{ width: 34, height: 34, borderRadius: 10, objectFit: "contain" }}
+            onError={(e) => {
+              // si no existe el archivo, que no rompa
+              (e.currentTarget as HTMLImageElement).style.display = "none";
+            }}
+          />
+          <div>
+            <div style={{ fontWeight: 900, letterSpacing: 0.2 }}>Auriona</div>
+            <div style={{ fontSize: 12, color: C.muted }}>{email}</div>
+          </div>
         </div>
 
-        <button onClick={createConversation} style={{ padding: 10 }}>
+        <button
+          onClick={createConversation}
+          style={{
+            padding: 12,
+            borderRadius: 12,
+            border: `1px solid ${C.border}`,
+            background: C.panel2,
+            color: C.text,
+            cursor: "pointer",
+            fontWeight: 700,
+          }}
+        >
           + Nueva conversación
         </button>
 
-        <div style={{ fontSize: 12, opacity: 0.7, marginTop: 6 }}>Conversaciones</div>
+        <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>Conversaciones</div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 6, overflowY: "auto" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, overflowY: "auto" }}>
           <button
             onClick={() => loadMessages("legacy")}
             style={{
               textAlign: "left",
-              padding: 10,
-              border: "1px solid #e5e7eb",
-              background: activeConvId === "legacy" ? "#f3f4f6" : "white",
+              padding: 12,
+              borderRadius: 14,
+              border: `1px solid ${C.border}`,
+              background: activeConvId === "legacy" ? C.soft : "transparent",
+              color: C.text,
+              cursor: "pointer",
             }}
           >
             Legacy (mensajes viejos)
@@ -287,13 +319,18 @@ export default function AppPage() {
               onClick={() => loadMessages(c.id)}
               style={{
                 textAlign: "left",
-                padding: 10,
-                border: "1px solid #e5e7eb",
-                background: activeConvId === c.id ? "#f3f4f6" : "white",
+                padding: 12,
+                borderRadius: 14,
+                border: `1px solid ${C.border}`,
+                background: activeConvId === c.id ? C.soft : "transparent",
+                color: C.text,
+                cursor: "pointer",
               }}
               title={c.title}
             >
-              {c.title}
+              <div style={{ fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                {c.title}
+              </div>
             </button>
           ))}
         </div>
@@ -304,7 +341,15 @@ export default function AppPage() {
               await supabase.auth.signOut();
               window.location.href = "/login";
             }}
-            style={{ padding: 10, width: "100%" }}
+            style={{
+              padding: 12,
+              width: "100%",
+              borderRadius: 12,
+              border: `1px solid ${C.border}`,
+              background: "transparent",
+              color: C.text,
+              cursor: "pointer",
+            }}
           >
             Cerrar sesión
           </button>
@@ -315,27 +360,30 @@ export default function AppPage() {
         <header
           style={{
             padding: 14,
-            borderBottom: "1px solid #e5e7eb",
-            fontWeight: 700,
+            borderBottom: `1px solid ${C.border}`,
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
             gap: 10,
+            background: "rgba(11,15,23,0.7)",
+            backdropFilter: "blur(8px)",
           }}
         >
-          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            <div>{activeTitle}</div>
+          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+            <div style={{ fontWeight: 800 }}>{activeTitle}</div>
 
             {activeConvId !== "legacy" && (
               <>
                 <button
                   onClick={renameConversation}
                   style={{
-                    padding: "6px 10px",
-                    borderRadius: 10,
-                    border: "1px solid #e5e7eb",
+                    padding: "7px 10px",
+                    borderRadius: 12,
+                    border: `1px solid ${C.border}`,
+                    background: "transparent",
+                    color: C.text,
                     cursor: "pointer",
-                    fontWeight: 600,
+                    fontWeight: 700,
                   }}
                 >
                   ✏️ Renombrar
@@ -344,11 +392,13 @@ export default function AppPage() {
                 <button
                   onClick={deleteConversation}
                   style={{
-                    padding: "6px 10px",
-                    borderRadius: 10,
-                    border: "1px solid #e5e7eb",
+                    padding: "7px 10px",
+                    borderRadius: 12,
+                    border: `1px solid ${C.border}`,
+                    background: "transparent",
+                    color: C.text,
                     cursor: "pointer",
-                    fontWeight: 700,
+                    fontWeight: 800,
                   }}
                   title="Borrar conversación"
                 >
@@ -361,52 +411,88 @@ export default function AppPage() {
           <button
             onClick={createConversation}
             style={{
-              padding: "8px 10px",
-              borderRadius: 10,
-              border: "1px solid #e5e7eb",
+              padding: "9px 12px",
+              borderRadius: 12,
+              border: `1px solid ${C.border}`,
+              background: C.panel2,
+              color: C.text,
               cursor: "pointer",
+              fontWeight: 800,
             }}
           >
             + Nuevo chat
           </button>
         </header>
 
-        <div style={{ flex: 1, padding: 16, overflowY: "auto" }}>
-          {msgs.map((m, i) => (
-            <div
-              key={i}
-              style={{
-                display: "flex",
-                justifyContent: m.role === "user" ? "flex-end" : "flex-start",
-                marginBottom: 10,
-              }}
-            >
+        <div style={{ flex: 1, padding: 18, overflowY: "auto" }}>
+          {msgs.map((m, i) => {
+            const isUser = m.role === "user";
+            return (
               <div
+                key={i}
                 style={{
-                  maxWidth: 680,
-                  padding: "10px 12px",
-                  borderRadius: 14,
-                  border: "1px solid #e5e7eb",
-                  background: m.role === "user" ? "#f3f4f6" : "white",
-                  whiteSpace: "pre-wrap",
+                  display: "flex",
+                  justifyContent: isUser ? "flex-end" : "flex-start",
+                  marginBottom: 12,
                 }}
               >
-                {m.text}
+                <div
+                  style={{
+                    maxWidth: 720,
+                    padding: "10px 12px",
+                    borderRadius: 16,
+                    border: `1px solid ${C.border}`,
+                    background: isUser ? "rgba(255,255,255,0.06)" : "rgba(255,255,255,0.03)",
+                    whiteSpace: "pre-wrap",
+                    lineHeight: 1.35,
+                  }}
+                >
+                  {m.text}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
           <div ref={bottomRef} />
         </div>
 
-        <footer style={{ padding: 16, borderTop: "1px solid #e5e7eb", display: "flex", gap: 10 }}>
+        <footer
+          style={{
+            padding: 16,
+            borderTop: `1px solid ${C.border}`,
+            display: "flex",
+            gap: 10,
+            background: C.panel,
+          }}
+        >
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder="Escribí..."
             onKeyDown={(e) => e.key === "Enter" && send()}
-            style={{ flex: 1, padding: 12, borderRadius: 12, border: "1px solid #e5e7eb" }}
+            style={{
+              flex: 1,
+              padding: 12,
+              borderRadius: 14,
+              border: `1px solid ${C.border}`,
+              background: "transparent",
+              color: C.text,
+              outline: "none",
+            }}
           />
-          <button onClick={send} disabled={busy} style={{ padding: "12px 14px" }}>
+          <button
+            onClick={send}
+            disabled={busy}
+            style={{
+              padding: "12px 14px",
+              borderRadius: 14,
+              border: `1px solid ${C.border}`,
+              background: busy ? "transparent" : C.panel2,
+              color: C.text,
+              cursor: busy ? "not-allowed" : "pointer",
+              fontWeight: 900,
+              minWidth: 92,
+            }}
+          >
             {busy ? "..." : "Enviar"}
           </button>
         </footer>
