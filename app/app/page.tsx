@@ -238,7 +238,6 @@ export default function AppPage() {
     }
   }
 
-  // 🎨 PALETA OSCURA
   const C = {
     bg: "#0b0f17",
     panel: "#0f1626",
@@ -262,7 +261,6 @@ export default function AppPage() {
           background: C.panel,
         }}
       >
-        {/* LOGO SOLO (GRANDE) */}
         <div
           style={{
             width: "100%",
@@ -277,19 +275,11 @@ export default function AppPage() {
           <img
             src="/auriona-logo.png"
             alt="Auriona"
-            style={{
-              width: "100%",
-              maxWidth: 240,
-              height: 70,
-              objectFit: "contain",
-              display: "block",
-            }}
+            style={{ width: "100%", maxWidth: 240, height: 70, objectFit: "contain", display: "block" }}
           />
         </div>
 
-        {/* (si querés ocultar también el email, borrá este bloque) */}
-        <div style={{ fontSize: 12, color: C.muted, marginTop: -4 }}>{email}</div>
-
+        {/* ✅ ÚNICO botón para iniciar */}
         <button
           onClick={createConversation}
           style={{
@@ -419,34 +409,17 @@ export default function AppPage() {
             )}
           </div>
 
-          <button
-            onClick={createConversation}
-            style={{
-              padding: "9px 12px",
-              borderRadius: 12,
-              border: `1px solid ${C.border}`,
-              background: C.panel2,
-              color: C.text,
-              cursor: "pointer",
-              fontWeight: 800,
-            }}
-          >
-            + Nuevo chat
-          </button>
+          {/* ❌ Eliminado: botón duplicado */}
+          <div style={{ fontSize: 12, color: C.muted }}>
+            Modo beta · (la UI se simplifica después)
+          </div>
         </header>
 
         <div style={{ flex: 1, padding: 18, overflowY: "auto" }}>
           {msgs.map((m, i) => {
             const isUser = m.role === "user";
             return (
-              <div
-                key={i}
-                style={{
-                  display: "flex",
-                  justifyContent: isUser ? "flex-end" : "flex-start",
-                  marginBottom: 12,
-                }}
-              >
+              <div key={i} style={{ display: "flex", justifyContent: isUser ? "flex-end" : "flex-start", marginBottom: 12 }}>
                 <div
                   style={{
                     maxWidth: 720,
@@ -466,15 +439,7 @@ export default function AppPage() {
           <div ref={bottomRef} />
         </div>
 
-        <footer
-          style={{
-            padding: 16,
-            borderTop: `1px solid ${C.border}`,
-            display: "flex",
-            gap: 10,
-            background: C.panel,
-          }}
-        >
+        <footer style={{ padding: 16, borderTop: `1px solid ${C.border}`, display: "flex", gap: 10, background: C.panel }}>
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
