@@ -36,7 +36,6 @@ export default function AppPage() {
     border: "rgba(255,255,255,0.10)",
     text: "rgba(255,255,255,0.92)",
     muted: "rgba(255,255,255,0.65)",
-    soft: "rgba(255,255,255,0.06)",
   };
 
   useEffect(() => {
@@ -81,7 +80,6 @@ export default function AppPage() {
         else interim += t;
       }
 
-      // vamos mostrando mientras dicta (interim) y consolidamos al final
       setInput((prev) => {
         const base = prev.trim();
         const add = (finalText || interim).trim();
@@ -168,27 +166,30 @@ export default function AppPage() {
     ]);
   }
 
-  function toggleMic() {
+  function micStart() {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR || !recRef.current) {
-      alert("Tu navegador no soporta dictado (SpeechRecognition). Probá Chrome/Edge.");
+      alert("Tu navegador no soporta dictado. Probá Chrome o Edge.");
       return;
     }
 
-    if (listening) {
-      try {
-        recRef.current.stop();
-      } catch {}
-      setListening(false);
-      return;
-    }
+    // ya está escuchando → no reiniciar
+    if (listening) return;
 
     setListening(true);
     try {
-      recRef.current.start();
+      recRef.current.start(); // requiere “gesto del usuario” (apretar botón)
     } catch {
       setListening(false);
     }
+  }
+
+  function micStop() {
+    if (!listening) return;
+    try {
+      recRef.current.stop();
+    } catch {}
+    setListening(false);
   }
 
   async function send() {
@@ -233,7 +234,7 @@ export default function AppPage() {
 
   return (
     <main style={{ height: "100vh", display: "flex", background: C.bg, color: C.text }}>
-      {/* Sidebar ANCHA + logo grande */}
+      {/* Sidebar */}
       <aside
         style={{
           width: 320,
@@ -263,7 +264,6 @@ export default function AppPage() {
           />
         </div>
 
-        {/* En modo “1 sola conversación” no mostramos lista ni botones */}
         <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.4 }}>
           Modo conversación única.
           <br />
@@ -324,9 +324,7 @@ export default function AppPage() {
             backdropFilter: "blur(8px)",
           }}
         >
-          {/* ✅ Sin texto al lado del logo / sin “Auri con amiga/o…” */}
           <div style={{ fontWeight: 900 }}>{title}</div>
-
           <div style={{ fontSize: 12, color: C.muted }}>Beta</div>
         </header>
 
@@ -334,7 +332,14 @@ export default function AppPage() {
           {msgs.map((m, i) => {
             const isUser = m.role === "user";
             return (
-              <div key={i} style={{ display: "flex", justifyContent: isUser ? "flex-end" : "flex-start", marginBottom: 12 }}>
+              <div
+                key={i}
+                style={{
+                  display: "flex",
+                  justifyContent: isUser ? "flex-end" : "flex-start",
+                  marginBottom: 12,
+                }}
+              >
                 <div
                   style={{
                     maxWidth: 760,
@@ -355,28 +360,45 @@ export default function AppPage() {
         </div>
 
         <footer style={{ padding: 16, borderTop: `1px solid ${C.border}`, display: "flex", gap: 10, background: C.panel }}>
-          {/* 🎤 mic */}
+          {/* 🎤 Push-to-talk */}
           <button
-            onClick={toggleMic}
+            onPointerDown={(e) => {
+              e.preventDefault();
+              micStart();
+            }}
+            onPointerUp={(e) => {
+              e.preventDefault();
+              micStop();
+            }}
+            onPointerCancel={(e) => {
+              e.preventDefault();
+              micStop();
+            }}
+            onPointerLeave={(e) => {
+              e.preventDefault();
+              micStop();
+            }}
             style={{
               padding: "12px 14px",
               borderRadius: 14,
               border: `1px solid ${C.border}`,
-              background: listening ? "rgba(255,255,255,0.08)" : "transparent",
+              background: listening ? "rgba(255,255,255,0.10)" : "transparent",
               color: C.text,
               cursor: "pointer",
               fontWeight: 900,
               minWidth: 54,
+              userSelect: "none",
+              touchAction: "none",
             }}
-            title={listening ? "Detener dictado" : "Dictar por voz"}
+            title="Mantener apretado para hablar"
           >
-            {listening ? "⏹" : "🎤"}
+            {listening ? "🎙️" : "🎤"}
           </button>
 
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Escribí o dictá…"
+            placeholder="Escribí o mantené apretado el mic…"
             onKeyDown={(e) => e.key === "Enter" && send()}
             style={{
               flex: 1,
