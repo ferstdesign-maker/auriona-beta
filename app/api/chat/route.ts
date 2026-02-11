@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 
-function looksLikeWeatherQuestion(message: string) {
-  const m = message.toLowerCase();
+function looksLikeWeatherQuestion(text: string) {
+  const m = (text || "").toLowerCase();
   return (
     m.includes("clima") ||
-    m.includes("tiempo ") ||
+    m.includes("tiempo") ||
     m.includes("temperatura") ||
     m.includes("pronóstico") ||
     m.includes("pronostico") ||
@@ -15,8 +15,7 @@ function looksLikeWeatherQuestion(message: string) {
 }
 
 function extractCity(message: string) {
-  // Heurística simple: "clima en X", "tiempo en X", "temperatura en X"
-  const m = message.trim();
+  const m = (message || "").trim();
 
   const patterns = [
     /clima en ([^?.!,\n]+)$/i,
@@ -30,32 +29,57 @@ function extractCity(message: string) {
     if (match && match[1]) return match[1].trim();
   }
 
-  // Si pone "en Trelew?" con signo, lo capturamos
   const generic = m.match(/\ben\b\s+([^?.!,\n]+)$/i);
   if (generic && generic[1]) return generic[1].trim();
 
   return "";
 }
 
+function isProbablyJustACity(message: string) {
+  const m = (message || "").trim();
+  // “Trelew”, “Buenos Aires”, “Rio de Janeiro”
+  // no números, no signos, no frases largas
+  if (m.length < 2 || m.length > 40) return false;
+  if (/[0-9]/.test(m)) return false;
+  if (/[?!.]/.test(m)) return false;
+  // 1 a 4 palabras
+  const parts = m.split(/\s+/).filter(Boolean);
+  if (parts.length > 4) return false;
+  return true;
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
-
     const message = String(body?.message ?? "");
     const history = Array.isArray(body?.history) ? body.history : [];
-
-    // location opcional desde el frontend
     const location = body?.location || {};
     const lat = location?.lat != null ? Number(location.lat) : null;
     const lon = location?.lon != null ? Number(location.lon) : null;
-
-    // Idioma (por ahora solo lo pasamos como contexto)
     const uiLang = String(body?.lang ?? "es");
 
-    // ✅ 1) Si es clima → respondemos con Open-Meteo (sin pasar por OpenAI)
-    if (looksLikeWeatherQuestion(message)) {
-      const cityFromText = extractCity(message);
-      const city = cityFromText || String(location?.city ?? "").trim();
+    // ✅ Detectar “modo clima” también si el mensaje anterior fue de clima
+    const lastUserFromHistory =
+      [...history].reverse().find((x: any) => x?.role === "user")?.content ?? "";
+    const weatherMode = looksLikeWeatherQuestion(message) || looksLikeWeatherQuestion(lastUserFromHistory);
+
+    if (weatherMode) {
+      let city = extractCity(message);
+      if (!city && isProbablyJustACity(message)) {
+        // el usuario escribió solo “Trelew”
+        city = message.trim();
+      }
+
+      // Si no hay city y tampoco coords, damos instrucción clara (sin OpenAI)
+      if (!city && (lat == null || lon == null)) {
+        const txt =
+          uiLang === "en"
+            ? "To check the weather, tell me a city (e.g. “weather in Trelew”) or press “Use my location” first."
+            : uiLang === "pt"
+            ? "Para ver o clima, me diga uma cidade (ex: “clima em Trelew”) ou aperte “Usar minha localização”."
+            : "Para ver el clima, decime una ciudad (ej: “clima en Trelew”) o primero apretá “Usar mi ubicación”.";
+        return NextResponse.json({ reply: txt }, { status: 200 });
+      }
 
       const r = await fetch(new URL("/api/weather", req.url), {
         method: "POST",
@@ -68,22 +92,15 @@ export async function POST(req: Request) {
         return NextResponse.json({ reply: data.text }, { status: 200 });
       }
 
-      // Si no pudo, caemos a un mensaje humano (sin inventar)
-      const fallback = data?.error
-        ? `No pude obtener el clima ahora: ${data.error}`
-        : "No pude obtener el clima ahora.";
+      const fallback = data?.error ? `No pude obtener el clima ahora: ${data.error}` : "No pude obtener el clima ahora.";
       return NextResponse.json({ reply: fallback }, { status: 200 });
     }
 
-    // ✅ 2) Si no es clima → OpenAI normal
+    // ✅ OpenAI normal
     const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) {
-      return NextResponse.json({ reply: "Falta OPENAI_API_KEY en el servidor." }, { status: 200 });
-    }
+    if (!apiKey) return NextResponse.json({ reply: "Falta OPENAI_API_KEY en el servidor." }, { status: 200 });
 
-    const system = `Sos Auriona (Auri), un asistente cálido, claro y práctico.
-Idioma UI: ${uiLang}.
-Si el usuario pide datos en tiempo real (clima, cotizaciones), pedí permiso para consultar o aclarar límites si no hay herramienta.`;
+    const system = `Sos Auriona (Auri), un asistente cálido, claro y práctico. Idioma UI: ${uiLang}.`;
 
     const input = [
       { role: "system", content: system },
@@ -93,10 +110,7 @@ Si el usuario pide datos en tiempo real (clima, cotizaciones), pedí permiso par
 
     const resp = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         model: process.env.OPENAI_MODEL || "gpt-4o-mini",
         messages: input,
