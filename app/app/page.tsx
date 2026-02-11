@@ -108,6 +108,29 @@ export default function AppPage() {
     await loadMessages(data.id);
   }
 
+  async function renameConversation() {
+    if (activeConvId === "legacy") return;
+
+    const current = convs.find((c) => c.id === activeConvId)?.title ?? "Conversación";
+    const next = window.prompt("Nuevo nombre de la conversación:", current);
+    if (!next) return;
+
+    const title = next.trim().slice(0, 60);
+    if (!title) return;
+
+    const { error } = await supabase.from("conversations").update({ title }).eq("id", activeConvId);
+    if (error) {
+      alert("No pude renombrar: " + error.message);
+      return;
+    }
+
+    await loadConversations();
+  }
+
+  async function deleteConversation() {
+    // lo hacemos en la mejora 3, por ahora no
+  }
+
   async function saveMessage(role: "user" | "auri", content: string, convId: string) {
     const { data: u } = await supabase.auth.getUser();
     if (!u.user) return;
@@ -256,7 +279,6 @@ export default function AppPage() {
       </aside>
 
       <section style={{ flex: 1, display: "flex", flexDirection: "column" }}>
-        {/* HEADER CON BOTÓN ARRIBA */}
         <header
           style={{
             padding: 14,
@@ -268,7 +290,24 @@ export default function AppPage() {
             gap: 10,
           }}
         >
-          <div>{activeTitle}</div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <div>{activeTitle}</div>
+
+            {activeConvId !== "legacy" && (
+              <button
+                onClick={renameConversation}
+                style={{
+                  padding: "6px 10px",
+                  borderRadius: 10,
+                  border: "1px solid #e5e7eb",
+                  cursor: "pointer",
+                  fontWeight: 600,
+                }}
+              >
+                ✏️ Renombrar
+              </button>
+            )}
+          </div>
 
           <button
             onClick={createConversation}
