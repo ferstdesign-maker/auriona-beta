@@ -21,9 +21,39 @@ export default function LoginPage() {
     soft: "rgba(255,255,255,0.06)",
   };
 
+  const t = {
+    es: {
+      email: "tu@email.com",
+      password: "contraseña",
+      login: "Ingresar",
+      signup: "Registrarme",
+      created: "Registro creado — ahora ingresá.",
+      missing: "Completá email y contraseña.",
+      errorTitle: "Error",
+    },
+    pt: {
+      email: "seu@email.com",
+      password: "senha",
+      login: "Entrar",
+      signup: "Criar conta",
+      created: "Conta criada — agora faça login.",
+      missing: "Preencha email e senha.",
+      errorTitle: "Erro",
+    },
+    en: {
+      email: "you@email.com",
+      password: "password",
+      login: "Sign in",
+      signup: "Create account",
+      created: "Account created — now sign in.",
+      missing: "Fill email and password.",
+      errorTitle: "Error",
+    },
+  }[lang];
+
   useEffect(() => {
     const saved = localStorage.getItem("auri_lang") as Lang | null;
-    if (saved) setLang(saved);
+    if (saved === "es" || saved === "pt" || saved === "en") setLang(saved);
   }, []);
 
   function setLangAndSave(l: Lang) {
@@ -44,7 +74,10 @@ export default function LoginPage() {
   }
 
   async function login() {
-    if (!email || !password) return;
+    if (!email || !password) {
+      alert(t.missing);
+      return;
+    }
     setBusy(true);
 
     const { error } = await supabase.auth.signInWithPassword({
@@ -55,30 +88,37 @@ export default function LoginPage() {
     setBusy(false);
 
     if (error) {
-      alert(error.message);
+      alert(`${t.errorTitle}: ${error.message}`);
       return;
     }
+
+    // guardamos el idioma en metadata (no bloquea)
+    await supabase.auth.updateUser({ data: { lang } });
 
     window.location.href = "/app";
   }
 
   async function register() {
-    if (!email || !password) return;
+    if (!email || !password) {
+      alert(t.missing);
+      return;
+    }
     setBusy(true);
 
     const { error } = await supabase.auth.signUp({
       email,
       password,
+      options: { data: { lang } },
     });
 
     setBusy(false);
 
     if (error) {
-      alert(error.message);
+      alert(`${t.errorTitle}: ${error.message}`);
       return;
     }
 
-    alert("Registro creado — ahora ingresá.");
+    alert(t.created);
   }
 
   return (
@@ -106,38 +146,27 @@ export default function LoginPage() {
       >
         {/* LOGO */}
         <div style={{ display: "grid", placeItems: "center" }}>
-          <img
-            src="/auriona-logo.png"
-            alt="Auriona"
-            style={{ width: 220, objectFit: "contain" }}
-          />
+          <img src="/auriona-logo.png" alt="Auriona" style={{ width: 220, objectFit: "contain" }} />
         </div>
 
         {/* BANDERAS */}
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "center",
-            gap: 10,
-            marginTop: 6,
-          }}
-        >
-          <button onClick={() => setLangAndSave("es")} style={flagBtn(lang === "es")}>
-            <img src="/flags/ar.png" width={24} />
+        <div style={{ display: "flex", justifyContent: "center", gap: 10, marginTop: 6 }}>
+          <button onClick={() => setLangAndSave("es")} style={flagBtn(lang === "es")} title="Español">
+            <img src="/flags/ar.png" width={24} height={24} alt="AR" />
           </button>
 
-          <button onClick={() => setLangAndSave("pt")} style={flagBtn(lang === "pt")}>
-            <img src="/flags/br.png" width={24} />
+          <button onClick={() => setLangAndSave("pt")} style={flagBtn(lang === "pt")} title="Português">
+            <img src="/flags/br.png" width={24} height={24} alt="BR" />
           </button>
 
-          <button onClick={() => setLangAndSave("en")} style={flagBtn(lang === "en")}>
-            <img src="/flags/us.png" width={24} />
+          <button onClick={() => setLangAndSave("en")} style={flagBtn(lang === "en")} title="English">
+            <img src="/flags/us.png" width={24} height={24} alt="US" />
           </button>
         </div>
 
         {/* EMAIL */}
         <input
-          placeholder="email"
+          placeholder={t.email}
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           style={{
@@ -146,6 +175,7 @@ export default function LoginPage() {
             border: `1px solid ${C.border}`,
             background: "transparent",
             color: C.text,
+            outline: "none",
           }}
         />
 
@@ -153,7 +183,7 @@ export default function LoginPage() {
         <div style={{ position: "relative" }}>
           <input
             type={showPass ? "text" : "password"}
-            placeholder="password"
+            placeholder={t.password}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             style={{
@@ -163,22 +193,28 @@ export default function LoginPage() {
               border: `1px solid ${C.border}`,
               background: "transparent",
               color: C.text,
+              outline: "none",
             }}
           />
 
           <button
-            onClick={() => setShowPass(!showPass)}
+            onClick={() => setShowPass((v) => !v)}
+            type="button"
             style={{
               position: "absolute",
               right: 8,
               top: 6,
+              height: 36,
+              width: 44,
+              borderRadius: 12,
               background: "transparent",
-              border: "none",
+              border: `1px solid ${C.border}`,
               cursor: "pointer",
-              color: C.muted,
+              color: C.text,
             }}
+            title={showPass ? "Ocultar" : "Mostrar"}
           >
-            👁
+            {showPass ? "🙈" : "👁"}
           </button>
         </div>
 
@@ -192,11 +228,11 @@ export default function LoginPage() {
             border: `1px solid ${C.border}`,
             background: C.soft,
             color: C.text,
-            fontWeight: 800,
-            cursor: "pointer",
+            fontWeight: 900,
+            cursor: busy ? "not-allowed" : "pointer",
           }}
         >
-          Ingresar
+          {busy ? "..." : t.login}
         </button>
 
         <button
@@ -208,10 +244,11 @@ export default function LoginPage() {
             border: `1px solid ${C.border}`,
             background: "transparent",
             color: C.muted,
-            cursor: "pointer",
+            cursor: busy ? "not-allowed" : "pointer",
+            fontWeight: 800,
           }}
         >
-          Registrarme
+          {t.signup}
         </button>
       </div>
     </main>
