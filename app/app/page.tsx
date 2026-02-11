@@ -4,239 +4,18 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../../lib/supabase";
 
 type Msg = { role: "user" | "auri"; text: string };
-type Conv = { id: string; title: string; created_at: string };
 
 export default function AppPage() {
-  const [email, setEmail] = useState("");
-  const [userId, setUserId] = useState<string>("");
-
-  const [convs, setConvs] = useState<Conv[]>([]);
-  const [activeConvId, setActiveConvId] = useState<string>("legacy");
-
-  const [msgs, setMsgs] = useState<Msg[]>([]);
-  const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
-
+  const [input, setInput] = useState("");
+  const [msgs, setMsgs] = useState<Msg[]>([]);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
-  const activeTitle = useMemo(() => {
-    if (activeConvId === "legacy") return "Legacy (mensajes viejos)";
-    const c = convs.find((x) => x.id === activeConvId);
-    return c?.title ?? "Conversación";
-  }, [activeConvId, convs]);
+  // usamos metadata del onboarding (si existe)
+  const [callUser, setCallUser] = useState("amiga/o");
+  const [callAssistant, setCallAssistant] = useState("Auri");
 
-  useEffect(() => {
-    (async () => {
-      const { data: u } = await supabase.auth.getUser();
-      if (!u.user) {
-        window.location.href = "/login";
-        return;
-      }
-      setEmail(u.user.email ?? "");
-      setUserId(u.user.id);
-
-      await loadConversations();
-      await loadMessages("legacy");
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [msgs]);
-
-  async function loadConversations() {
-    const { data, error } = await supabase
-      .from("conversations")
-      .select("id, title, created_at")
-      .order("created_at", { ascending: false });
-
-    if (error) {
-      alert("loadConversations error: " + error.message);
-      setConvs([]);
-      return;
-    }
-    setConvs((data ?? []) as any);
-  }
-
-  async function loadMessages(convId: string) {
-    setActiveConvId(convId);
-
-    let q = supabase
-      .from("messages")
-      .select("role, content, created_at")
-      .order("created_at", { ascending: true })
-      .limit(300);
-
-    if (convId === "legacy") q = q.is("conversation_id", null);
-    else q = q.eq("conversation_id", convId);
-
-    const { data: rows, error } = await q;
-
-    if (error) {
-      setMsgs([{ role: "auri", text: `No pude cargar mensajes: ${error.message}` }]);
-      return;
-    }
-
-    if (!rows || rows.length === 0) {
-      setMsgs([{ role: "auri", text: "Arranquemos esta conversación 🙂" }]);
-      return;
-    }
-
-    setMsgs(rows.map((r: any) => ({ role: r.role, text: r.content })));
-  }
-
-  async function createConversation() {
-    const { data: u } = await supabase.auth.getUser();
-    if (!u.user) {
-      window.location.href = "/login";
-      return;
-    }
-
-    const { data, error } = await supabase
-      .from("conversations")
-      .insert({ user_id: u.user.id, title: "Nueva conversación" })
-      .select("id, title, created_at")
-      .single();
-
-    if (error || !data) {
-      alert("No pude crear la conversación: " + (error?.message ?? ""));
-      return;
-    }
-
-    await loadConversations();
-    await loadMessages(data.id);
-  }
-
-  async function renameConversation() {
-    if (activeConvId === "legacy") return;
-
-    const current = convs.find((c) => c.id === activeConvId)?.title ?? "Conversación";
-    const next = window.prompt("Nuevo nombre de la conversación:", current);
-    if (!next) return;
-
-    const title = next.trim().slice(0, 60);
-    if (!title) return;
-
-    const { error } = await supabase.from("conversations").update({ title }).eq("id", activeConvId);
-    if (error) {
-      alert("No pude renombrar: " + error.message);
-      return;
-    }
-
-    await loadConversations();
-  }
-
-  async function deleteConversation() {
-    if (activeConvId === "legacy") return;
-
-    const title = convs.find((c) => c.id === activeConvId)?.title ?? "esta conversación";
-    const ok = window.confirm(`¿Seguro que querés borrar "${title}"?\n\nSe borran también todos sus mensajes.`);
-    if (!ok) return;
-
-    const { error: e1 } = await supabase.from("messages").delete().eq("conversation_id", activeConvId);
-    if (e1) {
-      alert("No pude borrar mensajes: " + e1.message);
-      return;
-    }
-
-    const { data: deleted, error: e2 } = await supabase
-      .from("conversations")
-      .delete()
-      .eq("id", activeConvId)
-      .select("id");
-
-    if (e2) {
-      alert("No pude borrar conversación: " + e2.message);
-      return;
-    }
-    if (!deleted || deleted.length === 0) {
-      alert("No se borró (probable RLS).");
-      return;
-    }
-
-    await loadConversations();
-    await loadMessages("legacy");
-  }
-
-  async function saveMessage(role: "user" | "auri", content: string, convId: string) {
-    const { data: u } = await supabase.auth.getUser();
-    if (!u.user) return;
-
-    const payload: any = { user_id: u.user.id, role, content };
-    if (convId !== "legacy") payload.conversation_id = convId;
-
-    const { error } = await supabase.from("messages").insert(payload);
-    if (error) console.log("DB insert error:", error.message);
-  }
-
-  async function autoTitleConversationIfNeeded(firstUserMessage: string, convId: string) {
-    if (convId === "legacy") return;
-
-    const { data: row } = await supabase
-      .from("conversations")
-      .select("title")
-      .eq("id", convId)
-      .single();
-
-    const currentTitle = String((row as any)?.title ?? "");
-    if (currentTitle && currentTitle !== "Nueva conversación") return;
-
-    const r = await fetch("/api/title", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: firstUserMessage }),
-    });
-
-    const data = await r.json();
-    const title = String(data?.title ?? "").trim() || "Conversación";
-
-    await supabase.from("conversations").update({ title }).eq("id", convId);
-    await loadConversations();
-  }
-
-  async function send() {
-    const text = input.trim();
-    if (!text || busy) return;
-
-    const convId = activeConvId;
-
-    const looksEmpty =
-      msgs.length === 0 ||
-      (msgs.length === 1 && msgs[0].role === "auri" && msgs[0].text.includes("Arranquemos"));
-
-    setInput("");
-    setMsgs((m) => [...m, { role: "user", text }]);
-    setBusy(true);
-
-    await saveMessage("user", text, convId);
-    if (looksEmpty) autoTitleConversationIfNeeded(text, convId);
-
-    try {
-      const history = msgs.slice(-12).map((m) => ({
-        role: m.role === "user" ? "user" : "assistant",
-        content: m.text,
-      }));
-
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text, history }),
-      });
-
-      const data = await res.json();
-      const reply = String(data.reply ?? "");
-
-      setMsgs((m) => [...m, { role: "auri", text: reply }]);
-      await saveMessage("auri", reply, convId);
-    } catch {
-      const fallback = "Tuve un problema de conexión.";
-      setMsgs((m) => [...m, { role: "auri", text: fallback }]);
-      await saveMessage("auri", fallback, convId);
-    } finally {
-      setBusy(false);
-    }
-  }
+  const title = useMemo(() => "Auriona", []);
 
   const C = {
     bg: "#0b0f17",
@@ -245,29 +24,159 @@ export default function AppPage() {
     border: "rgba(255,255,255,0.10)",
     text: "rgba(255,255,255,0.92)",
     muted: "rgba(255,255,255,0.65)",
-    soft: "rgba(255,255,255,0.08)",
   };
+
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.auth.getUser();
+      const user = data.user;
+      if (!user) {
+        window.location.href = "/login";
+        return;
+      }
+
+      const meta: any = user.user_metadata || {};
+      setCallUser(meta.call_user || meta.display_name || "amiga/o");
+      setCallAssistant(meta.call_assistant || "Auri");
+
+      await loadMainConversation();
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [msgs]);
+
+  async function loadMainConversation() {
+    // “1 sola conversación”: usamos conversation_id = null (legacy) como hilo principal
+    const { data: rows, error } = await supabase
+      .from("messages")
+      .select("role, content, created_at")
+      .is("conversation_id", null)
+      .order("created_at", { ascending: true })
+      .limit(500);
+
+    if (error) {
+      setMsgs([{ role: "auri", text: `No pude cargar el historial: ${error.message}` }]);
+      return;
+    }
+
+    if (!rows || rows.length === 0) {
+      setMsgs([
+        {
+          role: "auri",
+          text: `Hola ${callUser}. Soy ${callAssistant}. Estoy acá para ayudarte a pensar mejor, ordenar ideas y decidir con calma.\n\n¿Arrancamos?`,
+        },
+      ]);
+      return;
+    }
+
+    setMsgs(rows.map((r: any) => ({ role: r.role, text: r.content })));
+  }
+
+  async function saveMessage(role: "user" | "auri", content: string) {
+    const { data } = await supabase.auth.getUser();
+    if (!data.user) return;
+
+    const { error } = await supabase.from("messages").insert({
+      user_id: data.user.id,
+      role,
+      content,
+      conversation_id: null, // SIEMPRE hilo único
+    });
+
+    if (error) console.log("DB insert error:", error.message);
+  }
+
+  async function clearConversation() {
+    const ok = window.confirm("¿Querés borrar todo el historial de esta conversación?");
+    if (!ok) return;
+
+    const { data } = await supabase.auth.getUser();
+    if (!data.user) return;
+
+    const { error } = await supabase
+      .from("messages")
+      .delete()
+      .eq("user_id", data.user.id)
+      .is("conversation_id", null);
+
+    if (error) {
+      alert("No pude borrar: " + error.message);
+      return;
+    }
+
+    setMsgs([
+      {
+        role: "auri",
+        text: `Listo ${callUser}. Empezamos de cero.\n\n¿Con qué te doy una mano hoy?`,
+      },
+    ]);
+  }
+
+  async function send() {
+    const text = input.trim();
+    if (!text || busy) return;
+
+    setInput("");
+    setMsgs((m) => [...m, { role: "user", text }]);
+    setBusy(true);
+
+    await saveMessage("user", text);
+
+    try {
+      const history = msgs.slice(-16).map((m) => ({
+        role: m.role === "user" ? "user" : "assistant",
+        content: m.text,
+      }));
+
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: text,
+          history,
+          // “humanización” simple: lo mandamos para que el modelo lo use si quiere
+          profile: { callUser, callAssistant },
+        }),
+      });
+
+      const data = await res.json();
+      const reply = String(data.reply ?? "");
+
+      setMsgs((m) => [...m, { role: "auri", text: reply }]);
+      await saveMessage("auri", reply);
+    } catch {
+      const fallback = "Tuve un problema de conexión.";
+      setMsgs((m) => [...m, { role: "auri", text: fallback }]);
+      await saveMessage("auri", fallback);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <main style={{ height: "100vh", display: "flex", background: C.bg, color: C.text }}>
+      {/* Sidebar minimal: solo logo */}
       <aside
         style={{
-          width: 320,
+          width: 110,
           borderRight: `1px solid ${C.border}`,
           padding: 14,
-          display: "flex",
-          flexDirection: "column",
-          gap: 12,
           background: C.panel,
+          display: "grid",
+          gridTemplateRows: "auto 1fr auto",
+          gap: 12,
         }}
       >
         <div
           style={{
             width: "100%",
             border: `1px solid ${C.border}`,
-            borderRadius: 16,
+            borderRadius: 18,
             background: "rgba(255,255,255,0.04)",
-            padding: 14,
+            padding: 10,
             display: "grid",
             placeItems: "center",
           }}
@@ -275,88 +184,34 @@ export default function AppPage() {
           <img
             src="/auriona-logo.png"
             alt="Auriona"
-            style={{ width: "100%", maxWidth: 240, height: 70, objectFit: "contain", display: "block" }}
+            style={{ width: "100%", maxWidth: 90, height: 60, objectFit: "contain", display: "block" }}
           />
         </div>
 
-        {/* ✅ ÚNICO botón para iniciar */}
+        <div />
+
         <button
-          onClick={createConversation}
+          onClick={async () => {
+            await supabase.auth.signOut();
+            window.location.href = "/login";
+          }}
           style={{
-            padding: 12,
-            borderRadius: 12,
+            padding: 10,
+            borderRadius: 14,
             border: `1px solid ${C.border}`,
-            background: C.panel2,
+            background: "transparent",
             color: C.text,
             cursor: "pointer",
             fontWeight: 800,
+            fontSize: 12,
           }}
+          title="Cerrar sesión"
         >
-          + Nueva conversación
+          Salir
         </button>
-
-        <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>Conversaciones</div>
-
-        <div style={{ display: "flex", flexDirection: "column", gap: 8, overflowY: "auto" }}>
-          <button
-            onClick={() => loadMessages("legacy")}
-            style={{
-              textAlign: "left",
-              padding: 12,
-              borderRadius: 14,
-              border: `1px solid ${C.border}`,
-              background: activeConvId === "legacy" ? C.soft : "transparent",
-              color: C.text,
-              cursor: "pointer",
-            }}
-          >
-            Legacy (mensajes viejos)
-          </button>
-
-          {convs.map((c) => (
-            <button
-              key={c.id}
-              onClick={() => loadMessages(c.id)}
-              style={{
-                textAlign: "left",
-                padding: 12,
-                borderRadius: 14,
-                border: `1px solid ${C.border}`,
-                background: activeConvId === c.id ? C.soft : "transparent",
-                color: C.text,
-                cursor: "pointer",
-              }}
-              title={c.title}
-            >
-              <div style={{ fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                {c.title}
-              </div>
-            </button>
-          ))}
-        </div>
-
-        <div style={{ marginTop: "auto" }}>
-          <button
-            onClick={async () => {
-              await supabase.auth.signOut();
-              window.location.href = "/login";
-            }}
-            style={{
-              padding: 12,
-              width: "100%",
-              borderRadius: 12,
-              border: `1px solid ${C.border}`,
-              background: "transparent",
-              color: C.text,
-              cursor: "pointer",
-              fontWeight: 700,
-            }}
-          >
-            Cerrar sesión
-          </button>
-        </div>
       </aside>
 
+      {/* Chat único */}
       <section style={{ flex: 1, display: "flex", flexDirection: "column" }}>
         <header
           style={{
@@ -370,59 +225,46 @@ export default function AppPage() {
             backdropFilter: "blur(8px)",
           }}
         >
-          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-            <div style={{ fontWeight: 800 }}>{activeTitle}</div>
-
-            {activeConvId !== "legacy" && (
-              <>
-                <button
-                  onClick={renameConversation}
-                  style={{
-                    padding: "7px 10px",
-                    borderRadius: 12,
-                    border: `1px solid ${C.border}`,
-                    background: "transparent",
-                    color: C.text,
-                    cursor: "pointer",
-                    fontWeight: 700,
-                  }}
-                >
-                  ✏️ Renombrar
-                </button>
-
-                <button
-                  onClick={deleteConversation}
-                  style={{
-                    padding: "7px 10px",
-                    borderRadius: 12,
-                    border: `1px solid ${C.border}`,
-                    background: "transparent",
-                    color: C.text,
-                    cursor: "pointer",
-                    fontWeight: 800,
-                  }}
-                  title="Borrar conversación"
-                >
-                  🗑 Borrar
-                </button>
-              </>
-            )}
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            <div style={{ fontWeight: 900 }}>{title}</div>
+            <div style={{ fontSize: 12, color: C.muted }}>
+              {callAssistant} con {callUser} · conversación continua
+            </div>
           </div>
 
-          {/* ❌ Eliminado: botón duplicado */}
-          <div style={{ fontSize: 12, color: C.muted }}>
-            Modo beta · (la UI se simplifica después)
-          </div>
+          <button
+            onClick={clearConversation}
+            style={{
+              padding: "9px 12px",
+              borderRadius: 14,
+              border: `1px solid ${C.border}`,
+              background: "transparent",
+              color: C.text,
+              cursor: "pointer",
+              fontWeight: 900,
+              fontSize: 12,
+            }}
+            title="Borrar historial (beta)"
+          >
+            Borrar historial
+          </button>
         </header>
 
         <div style={{ flex: 1, padding: 18, overflowY: "auto" }}>
           {msgs.map((m, i) => {
             const isUser = m.role === "user";
             return (
-              <div key={i} style={{ display: "flex", justifyContent: isUser ? "flex-end" : "flex-start", marginBottom: 12 }}>
+              <div
+                key={i}
+                style={{
+                  display: "flex",
+                  justifyContent: isUser ? "flex-end" : "flex-start",
+                  marginBottom: 12,
+                }}
+              >
                 <div
                   style={{
-                    maxWidth: 720,
+                    maxWidth: 760,
                     padding: "10px 12px",
                     borderRadius: 16,
                     border: `1px solid ${C.border}`,
@@ -443,7 +285,7 @@ export default function AppPage() {
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Escribí..."
+            placeholder="Escribí o hablá (próximo paso: micrófono)…"
             onKeyDown={(e) => e.key === "Enter" && send()}
             style={{
               flex: 1,
