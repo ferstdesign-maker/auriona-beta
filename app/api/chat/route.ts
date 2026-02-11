@@ -14,55 +14,72 @@ function needsWeb(message: string) {
     "precio",
     "cotización",
     "dólar",
-    "btc",
-    "bitcoin",
+    "noticias",
     "hoy",
     "mañana",
     "ayer",
-    "noticias",
-    "último",
-    "reciente",
-    "actualizado",
     "horario",
     "abierto",
     "cerrado",
-    "cuánto cuesta",
-    "dónde queda",
-    "teléfono",
+    "dónde",
     "dirección",
+    "teléfono",
+    "comprar",
+    "local",
+    "helado",
+    "trelew",
   ];
   return triggers.some((t) => m.includes(t));
 }
 
-function safeStyleNote(style_notes: string | null) {
-  if (!style_notes) return "";
-  return style_notes.slice(0, 600);
+async function createResponseWithFallback(params: any) {
+  // Intentamos en orden. Si un modelo no existe en tu cuenta, probamos otro.
+  const preferred = process.env.OPENAI_MODEL?.trim();
+  const models = [
+    preferred,
+    "gpt-5",
+    "gpt-5-mini",
+    "gpt-4o-mini",
+    "gpt-4.1-mini",
+  ].filter(Boolean);
+
+  let lastErr: any = null;
+
+  for (const model of models) {
+    try {
+      const resp = await client.responses.create({ ...params, model });
+      return resp;
+    } catch (e: any) {
+      lastErr = e;
+      // seguimos probando
+    }
+  }
+
+  throw lastErr;
 }
 
 export async function POST(req: Request) {
   try {
     const body = await req.json();
+
     const message = String(body.message ?? "");
     const history = Array.isArray(body.history) ? body.history : [];
     const lang = String(body.lang ?? "es");
     const profile = body.profile ?? {};
     const location = body.location ?? {};
 
-    // ⚠️ Hard rules mínimas (luego las refinamos)
     const system = `
-Sos Auriona (Auri). Tono: cálido, simple, rioplatense si es español.
-Reglas:
-- Si falta un dato (ej: ciudad para clima), pedilo UNA vez, cortito.
-- Si el usuario pide datos actuales, usá web search cuando esté disponible.
-- No inventes. Si no encontrás, decí "no pude confirmarlo" y ofrecé alternativa.
-- Respetá privacidad: solo recordá lo que el usuario te dijo en esta sesión (o lo guardado por el sistema).
-Idioma del usuario: ${lang}.
-Nombre para el usuario: ${profile.callUser ?? "amiga/o"}.
-Tu nombre: ${profile.callAssistant ?? "Auri"}.
-Ubicación aproximada (si hay): lat=${location.lat ?? "?"}, lon=${location.lon ?? "?"}.
+Sos Auriona (Auri). Tono: cálido, simple y útil.
+Reglas importantes:
+- Si la consulta necesita datos actuales/locales (ej: lugares, horarios, clima, precios), intentá usar web search.
+- No inventes. Si no encontrás, decí “No pude confirmarlo” y pedí 1 dato puntual o proponé alternativa.
+- Salud: no diagnostiques. Para dolor de rodilla, da consejos generales seguros y sugerí consulta profesional si hay señales de alarma.
+Idioma: ${lang}
+Nombre del usuario: ${profile.callUser ?? "amiga/o"}
+Tu nombre: ${profile.callAssistant ?? "Auri"}
+Ubicación (si hay): lat=${location.lat ?? "?"}, lon=${location.lon ?? "?"}
     `.trim();
 
-    // Preparamos mensajes
     const messages = [
       { role: "system" as const, content: system },
       ...history
@@ -73,25 +90,42 @@ Ubicación aproximada (si hay): lat=${location.lat ?? "?"}, lon=${location.lon ?
 
     const useWeb = needsWeb(message);
 
-    // ✅ Responses API con web search (cuando aplica)
-    const resp = await client.responses.create({
-      model: "gpt-5-mini", // podés subir luego
+    const params: any = {
       input: messages,
-      // si no hace falta web, no lo incluimos
-      ...(useWeb
-        ? {
-            tools: [{ type: "web_search" }],
-          }
-        : {}),
       temperature: 0.6,
-    });
+      store: false,
+    };
 
-    // sacamos el texto final (simple)
-    const outText = resp.output_text ?? "";
+    // ✅ Solo si hace falta: habilitamos web_search
+    if (useWeb) {
+      params.tools = [{ type: "web_search" }];
+      params.tool_choice = "auto";
+      // opcional: si querés ver fuentes completas algún día:
+      // params.include = ["web_search_call.action.sources"];
+    }
+
+    const resp = await createResponseWithFallback(params);
+
+    const outText = (resp as any).output_text ?? "";
     const reply = outText.trim() || "Perdón, no pude generar respuesta.";
 
     return NextResponse.json({ reply, used_web: useWeb });
   } catch (e: any) {
-    return NextResponse.json({ reply: "Error de servidor. Probá de nuevo.", error: String(e?.message ?? e) }, { status: 500 });
+    // ✅ MUY IMPORTANTE: devolvemos el error real para debug
+    const status = e?.status || 500;
+    const msg =
+      e?.message ||
+      e?.error?.message ||
+      (typeof e === "string" ? e : "Unknown error");
+
+    console.error("API /chat error:", e);
+
+    return NextResponse.json(
+      {
+        reply: "Error de servidor. Probá de nuevo.",
+        debug: String(msg),
+      },
+      { status }
+    );
   }
 }
