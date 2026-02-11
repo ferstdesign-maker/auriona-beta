@@ -5,15 +5,27 @@ import { supabase } from "../../lib/supabase";
 
 type Msg = { role: "user" | "auri"; text: string };
 
+// Web Speech API types (para TS)
+declare global {
+  interface Window {
+    webkitSpeechRecognition?: any;
+    SpeechRecognition?: any;
+  }
+}
+
 export default function AppPage() {
   const [busy, setBusy] = useState(false);
   const [input, setInput] = useState("");
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
-  // usamos metadata del onboarding (si existe)
+  // onboarding metadata
   const [callUser, setCallUser] = useState("amiga/o");
   const [callAssistant, setCallAssistant] = useState("Auri");
+
+  // dictado
+  const [listening, setListening] = useState(false);
+  const recRef = useRef<any>(null);
 
   const title = useMemo(() => "Auriona", []);
 
@@ -24,6 +36,7 @@ export default function AppPage() {
     border: "rgba(255,255,255,0.10)",
     text: "rgba(255,255,255,0.92)",
     muted: "rgba(255,255,255,0.65)",
+    soft: "rgba(255,255,255,0.06)",
   };
 
   useEffect(() => {
@@ -48,8 +61,48 @@ export default function AppPage() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [msgs]);
 
+  useEffect(() => {
+    // inicializa SpeechRecognition si existe
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) return;
+
+    const rec = new SR();
+    rec.lang = "es-AR";
+    rec.interimResults = true;
+    rec.continuous = false;
+
+    rec.onresult = (event: any) => {
+      let finalText = "";
+      let interim = "";
+
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const t = event.results[i][0].transcript;
+        if (event.results[i].isFinal) finalText += t;
+        else interim += t;
+      }
+
+      // vamos mostrando mientras dicta (interim) y consolidamos al final
+      setInput((prev) => {
+        const base = prev.trim();
+        const add = (finalText || interim).trim();
+        if (!add) return prev;
+        if (!base) return add;
+        return base + " " + add;
+      });
+    };
+
+    rec.onerror = () => {
+      setListening(false);
+    };
+
+    rec.onend = () => {
+      setListening(false);
+    };
+
+    recRef.current = rec;
+  }, []);
+
   async function loadMainConversation() {
-    // “1 sola conversación”: usamos conversation_id = null (legacy) como hilo principal
     const { data: rows, error } = await supabase
       .from("messages")
       .select("role, content, created_at")
@@ -83,7 +136,7 @@ export default function AppPage() {
       user_id: data.user.id,
       role,
       content,
-      conversation_id: null, // SIEMPRE hilo único
+      conversation_id: null,
     });
 
     if (error) console.log("DB insert error:", error.message);
@@ -115,6 +168,29 @@ export default function AppPage() {
     ]);
   }
 
+  function toggleMic() {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR || !recRef.current) {
+      alert("Tu navegador no soporta dictado (SpeechRecognition). Probá Chrome/Edge.");
+      return;
+    }
+
+    if (listening) {
+      try {
+        recRef.current.stop();
+      } catch {}
+      setListening(false);
+      return;
+    }
+
+    setListening(true);
+    try {
+      recRef.current.start();
+    } catch {
+      setListening(false);
+    }
+  }
+
   async function send() {
     const text = input.trim();
     if (!text || busy) return;
@@ -137,7 +213,6 @@ export default function AppPage() {
         body: JSON.stringify({
           message: text,
           history,
-          // “humanización” simple: lo mandamos para que el modelo lo use si quiere
           profile: { callUser, callAssistant },
         }),
       });
@@ -158,15 +233,15 @@ export default function AppPage() {
 
   return (
     <main style={{ height: "100vh", display: "flex", background: C.bg, color: C.text }}>
-      {/* Sidebar minimal: solo logo */}
+      {/* Sidebar ANCHA + logo grande */}
       <aside
         style={{
-          width: 110,
+          width: 320,
           borderRight: `1px solid ${C.border}`,
           padding: 14,
           background: C.panel,
-          display: "grid",
-          gridTemplateRows: "auto 1fr auto",
+          display: "flex",
+          flexDirection: "column",
           gap: 12,
         }}
       >
@@ -174,9 +249,9 @@ export default function AppPage() {
           style={{
             width: "100%",
             border: `1px solid ${C.border}`,
-            borderRadius: 18,
+            borderRadius: 16,
             background: "rgba(255,255,255,0.04)",
-            padding: 10,
+            padding: 14,
             display: "grid",
             placeItems: "center",
           }}
@@ -184,34 +259,58 @@ export default function AppPage() {
           <img
             src="/auriona-logo.png"
             alt="Auriona"
-            style={{ width: "100%", maxWidth: 90, height: 60, objectFit: "contain", display: "block" }}
+            style={{ width: "100%", maxWidth: 240, height: 70, objectFit: "contain", display: "block" }}
           />
         </div>
 
-        <div />
+        {/* En modo “1 sola conversación” no mostramos lista ni botones */}
+        <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.4 }}>
+          Modo conversación única.
+          <br />
+          (El historial existe, pero no se muestra en carpetas.)
+        </div>
 
-        <button
-          onClick={async () => {
-            await supabase.auth.signOut();
-            window.location.href = "/login";
-          }}
-          style={{
-            padding: 10,
-            borderRadius: 14,
-            border: `1px solid ${C.border}`,
-            background: "transparent",
-            color: C.text,
-            cursor: "pointer",
-            fontWeight: 800,
-            fontSize: 12,
-          }}
-          title="Cerrar sesión"
-        >
-          Salir
-        </button>
+        <div style={{ marginTop: "auto", display: "grid", gap: 10 }}>
+          <button
+            onClick={clearConversation}
+            style={{
+              padding: 12,
+              width: "100%",
+              borderRadius: 12,
+              border: `1px solid ${C.border}`,
+              background: "transparent",
+              color: C.text,
+              cursor: "pointer",
+              fontWeight: 800,
+            }}
+            title="Borrar historial (beta)"
+          >
+            Borrar historial
+          </button>
+
+          <button
+            onClick={async () => {
+              await supabase.auth.signOut();
+              window.location.href = "/login";
+            }}
+            style={{
+              padding: 12,
+              width: "100%",
+              borderRadius: 12,
+              border: `1px solid ${C.border}`,
+              background: "transparent",
+              color: C.text,
+              cursor: "pointer",
+              fontWeight: 800,
+            }}
+            title="Cerrar sesión"
+          >
+            Cerrar sesión
+          </button>
+        </div>
       </aside>
 
-      {/* Chat único */}
+      {/* Chat */}
       <section style={{ flex: 1, display: "flex", flexDirection: "column" }}>
         <header
           style={{
@@ -225,43 +324,17 @@ export default function AppPage() {
             backdropFilter: "blur(8px)",
           }}
         >
-          <div style={{ display: "flex", flexDirection: "column" }}>
-            <div style={{ fontWeight: 900 }}>{title}</div>
-            <div style={{ fontSize: 12, color: C.muted }}>
-              {callAssistant} con {callUser} · conversación continua
-            </div>
-          </div>
+          {/* ✅ Sin texto al lado del logo / sin “Auri con amiga/o…” */}
+          <div style={{ fontWeight: 900 }}>{title}</div>
 
-          <button
-            onClick={clearConversation}
-            style={{
-              padding: "9px 12px",
-              borderRadius: 14,
-              border: `1px solid ${C.border}`,
-              background: "transparent",
-              color: C.text,
-              cursor: "pointer",
-              fontWeight: 900,
-              fontSize: 12,
-            }}
-            title="Borrar historial (beta)"
-          >
-            Borrar historial
-          </button>
+          <div style={{ fontSize: 12, color: C.muted }}>Beta</div>
         </header>
 
         <div style={{ flex: 1, padding: 18, overflowY: "auto" }}>
           {msgs.map((m, i) => {
             const isUser = m.role === "user";
             return (
-              <div
-                key={i}
-                style={{
-                  display: "flex",
-                  justifyContent: isUser ? "flex-end" : "flex-start",
-                  marginBottom: 12,
-                }}
-              >
+              <div key={i} style={{ display: "flex", justifyContent: isUser ? "flex-end" : "flex-start", marginBottom: 12 }}>
                 <div
                   style={{
                     maxWidth: 760,
@@ -282,10 +355,28 @@ export default function AppPage() {
         </div>
 
         <footer style={{ padding: 16, borderTop: `1px solid ${C.border}`, display: "flex", gap: 10, background: C.panel }}>
+          {/* 🎤 mic */}
+          <button
+            onClick={toggleMic}
+            style={{
+              padding: "12px 14px",
+              borderRadius: 14,
+              border: `1px solid ${C.border}`,
+              background: listening ? "rgba(255,255,255,0.08)" : "transparent",
+              color: C.text,
+              cursor: "pointer",
+              fontWeight: 900,
+              minWidth: 54,
+            }}
+            title={listening ? "Detener dictado" : "Dictar por voz"}
+          >
+            {listening ? "⏹" : "🎤"}
+          </button>
+
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Escribí o hablá (próximo paso: micrófono)…"
+            placeholder="Escribí o dictá…"
             onKeyDown={(e) => e.key === "Enter" && send()}
             style={{
               flex: 1,
@@ -297,6 +388,7 @@ export default function AppPage() {
               outline: "none",
             }}
           />
+
           <button
             onClick={send}
             disabled={busy}
