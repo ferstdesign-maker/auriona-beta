@@ -4,15 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../../lib/supabase";
 
 type Msg = { role: "user" | "auri"; text: string };
-
 type Lang = "es" | "pt" | "en";
-
-type LocationState = {
-  lat: number | null;
-  lon: number | null;
-  city?: string; // opcional
-  label?: string; // "Trelew, Chubut" si algún día lo hacemos
-};
+type LocationState = { lat: number | null; lon: number | null; city?: string; label?: string };
 
 declare global {
   interface Window {
@@ -27,22 +20,20 @@ export default function AppPage() {
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
-  // onboarding metadata
   const [callUser, setCallUser] = useState("amiga/o");
   const [callAssistant, setCallAssistant] = useState("Auri");
 
-  // idioma (viene del login por banderitas)
   const [lang, setLang] = useState<Lang>("es");
-
-  // voz (TTS)
   const [autoSpeak, setAutoSpeak] = useState(true);
 
-  // dictado (push-to-talk)
   const [listening, setListening] = useState(false);
   const recRef = useRef<any>(null);
 
-  // ubicación
   const [loc, setLoc] = useState<LocationState>({ lat: null, lon: null });
+
+  // ✅ responsive
+  const [isMobile, setIsMobile] = useState(false);
+  const [showMenu, setShowMenu] = useState(false); // panel lateral en mobile
 
   const title = useMemo(() => "Auriona", []);
 
@@ -56,7 +47,6 @@ export default function AppPage() {
     soft: "rgba(255,255,255,0.06)",
   };
 
-  // Helpers localStorage
   function getStoredLang(): Lang {
     const v = (typeof window !== "undefined" && localStorage.getItem("auri_lang")) || "es";
     if (v === "pt" || v === "en" || v === "es") return v;
@@ -83,9 +73,19 @@ export default function AppPage() {
   }
 
   useEffect(() => {
-    // carga idioma y ubicación guardadas
     setLang(getStoredLang());
     setLoc(getStoredLoc());
+  }, []);
+
+  // ✅ detectar mobile (por ancho)
+  useEffect(() => {
+    function onResize() {
+      setIsMobile(window.innerWidth < 900);
+      if (window.innerWidth >= 900) setShowMenu(false);
+    }
+    onResize();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
   }, []);
 
   useEffect(() => {
@@ -101,7 +101,6 @@ export default function AppPage() {
       setCallUser(meta.call_user || meta.display_name || "amiga/o");
       setCallAssistant(meta.call_assistant || "Auri");
 
-      // si no hizo onboarding → mandarlo
       if (!meta.onboarded) {
         window.location.href = "/onboarding";
         return;
@@ -116,7 +115,7 @@ export default function AppPage() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [msgs]);
 
-  // Inicializa SpeechRecognition
+  // SpeechRecognition init
   useEffect(() => {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) return;
@@ -129,13 +128,11 @@ export default function AppPage() {
     rec.onresult = (event: any) => {
       let finalText = "";
       let interim = "";
-
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const t = event.results[i][0].transcript;
         if (event.results[i].isFinal) finalText += t;
         else interim += t;
       }
-
       setInput((prev) => {
         const base = prev.trim();
         const add = (finalText || interim).trim();
@@ -158,10 +155,7 @@ export default function AppPage() {
       if (!("speechSynthesis" in window)) return;
 
       window.speechSynthesis.cancel();
-
       const u = new SpeechSynthesisUtterance(text);
-
-      // Idioma de la voz según selección
       u.lang = lang === "pt" ? "pt-BR" : lang === "en" ? "en-US" : "es-AR";
 
       const voices = window.speechSynthesis.getVoices?.() || [];
@@ -171,14 +165,11 @@ export default function AppPage() {
         voices.find((v) => /es|pt|en/i.test(v.lang));
 
       if (preferred) u.voice = preferred;
-
       u.rate = 1.02;
       u.pitch = 1.02;
 
       window.speechSynthesis.speak(u);
-    } catch {
-      // silencioso
-    }
+    } catch {}
   }
 
   async function loadMainConversation() {
@@ -197,14 +188,11 @@ export default function AppPage() {
     if (!rows || rows.length === 0) {
       const hello =
         lang === "en"
-          ? `Hi ${callUser}. I'm ${callAssistant}. I'm here to help you think clearer and decide calmly.\n\nShall we start?`
+          ? `Hi ${callUser}. I'm ${callAssistant}. Shall we start?`
           : lang === "pt"
-          ? `Oi ${callUser}. Eu sou ${callAssistant}. Estou aqui para te ajudar a pensar melhor e decidir com calma.\n\nVamos começar?`
-          : `Hola ${callUser}. Soy ${callAssistant}. Estoy acá para ayudarte a pensar mejor, ordenar ideas y decidir con calma.\n\n¿Arrancamos?`;
-
+          ? `Oi ${callUser}. Eu sou ${callAssistant}. Vamos começar?`
+          : `Hola ${callUser}. Soy ${callAssistant}. ¿Arrancamos?`;
       setMsgs([{ role: "auri", text: hello }]);
-      // opcional hablar el saludo
-      // speak(hello);
       return;
     }
 
@@ -226,10 +214,10 @@ export default function AppPage() {
   async function clearConversation() {
     const ok = window.confirm(
       lang === "en"
-        ? "Do you want to delete the full history?"
+        ? "Delete the full history?"
         : lang === "pt"
-        ? "Quer apagar todo o histórico?"
-        : "¿Querés borrar todo el historial de esta conversación?"
+        ? "Apagar todo o histórico?"
+        : "¿Borrar todo el historial?"
     );
     if (!ok) return;
 
@@ -249,13 +237,14 @@ export default function AppPage() {
 
     const txt =
       lang === "en"
-        ? `Done ${callUser}. Fresh start.\n\nWhat do you need?`
+        ? `Done ${callUser}. Fresh start.`
         : lang === "pt"
-        ? `Pronto ${callUser}. Começamos do zero.\n\nComo posso ajudar?`
-        : `Listo ${callUser}. Empezamos de cero.\n\n¿Con qué te doy una mano hoy?`;
+        ? `Pronto ${callUser}. Começamos do zero.`
+        : `Listo ${callUser}. Empezamos de cero.`;
 
     setMsgs([{ role: "auri", text: txt }]);
     speak(txt);
+    setShowMenu(false);
   }
 
   function micStart() {
@@ -267,7 +256,7 @@ export default function AppPage() {
     if (listening) return;
     setListening(true);
     try {
-      recRef.current.start(); // requiere gesto del usuario
+      recRef.current.start();
     } catch {
       setListening(false);
     }
@@ -283,7 +272,7 @@ export default function AppPage() {
 
   async function useMyLocation() {
     if (typeof navigator === "undefined" || !navigator.geolocation) {
-      alert(lang === "en" ? "Geolocation not available." : "Tu navegador no permite geolocalización.");
+      alert(lang === "en" ? "Geolocation not available." : "Geolocalización no disponible.");
       return;
     }
 
@@ -292,15 +281,10 @@ export default function AppPage() {
         const next = { lat: pos.coords.latitude, lon: pos.coords.longitude };
         setLoc(next);
         storeLoc(next);
+        setShowMenu(false);
       },
-      (e) => {
-        alert(
-          (lang === "en"
-            ? "Location permission denied."
-            : lang === "pt"
-            ? "Permissão de localização negada."
-            : "Permiso de ubicación denegado.") + ` (${e.code})`
-        );
+      () => {
+        alert(lang === "en" ? "Location permission denied." : lang === "pt" ? "Permissão negada." : "Permiso de ubicación denegado.");
       },
       { enableHighAccuracy: true, timeout: 12000 }
     );
@@ -328,8 +312,8 @@ export default function AppPage() {
         body: JSON.stringify({
           message: text,
           history,
-          lang, // ✅ idioma elegido
-          location: loc, // ✅ lat/lon si existe
+          lang,
+          location: loc,
           profile: { callUser, callAssistant },
         }),
       });
@@ -339,7 +323,6 @@ export default function AppPage() {
 
       setMsgs((m) => [...m, { role: "auri", text: reply }]);
       await saveMessage("auri", reply);
-
       speak(reply);
     } catch {
       const fallback = lang === "en" ? "Connection problem." : lang === "pt" ? "Problema de conexão." : "Tuve un problema de conexión.";
@@ -351,234 +334,274 @@ export default function AppPage() {
     }
   }
 
+  async function signOut() {
+    await supabase.auth.signOut();
+    window.location.href = "/login";
+  }
+
+  // ✅ tamaños consistentes (no se “quintuplica”)
+  const logoStyle = isMobile
+    ? { width: 190, height: 48, objectFit: "contain" as const }
+    : { width: 240, height: 60, objectFit: "contain" as const };
+
+  const topBtnStyle = {
+    padding: isMobile ? "10px 12px" : "10px 12px",
+    borderRadius: 12,
+    border: `1px solid ${C.border}`,
+    background: "transparent",
+    color: C.text,
+    cursor: "pointer",
+    fontWeight: 900 as const,
+    whiteSpace: "nowrap" as const,
+    fontSize: 13,
+  };
+
   return (
-    <main style={{ height: "100vh", display: "flex", background: C.bg, color: C.text }}>
-      {/* Sidebar */}
-      <aside
-        style={{
-          width: 320,
-          borderRight: `1px solid ${C.border}`,
-          padding: 14,
-          background: C.panel,
-          display: "flex",
-          flexDirection: "column",
-          gap: 12,
-        }}
-      >
-        <div
-          style={{
-            width: "100%",
-            border: `1px solid ${C.border}`,
-            borderRadius: 16,
-            background: "rgba(255,255,255,0.04)",
-            padding: 14,
-            display: "grid",
-            placeItems: "center",
-          }}
-        >
-          <img
-            src="/auriona-logo.png"
-            alt="Auriona"
-            style={{ width: "100%", maxWidth: 240, height: 70, objectFit: "contain", display: "block" }}
-          />
-        </div>
-
-        {/* ✅ Ubicación */}
-        <button
-          onClick={useMyLocation}
-          style={{
-            padding: 12,
-            width: "100%",
-            borderRadius: 12,
-            border: `1px solid ${C.border}`,
-            background: "transparent",
-            color: C.text,
-            cursor: "pointer",
-            fontWeight: 900,
-          }}
-          title="Usar mi ubicación"
-        >
-          📍 Usar mi ubicación
-        </button>
-
-        <div style={{ fontSize: 12, color: C.muted }}>
-          {loc.lat != null && loc.lon != null ? (
-            <>
-              Ubicación lista: {loc.lat.toFixed(3)}, {loc.lon.toFixed(3)}
-            </>
-          ) : (
-            <>Ubicación: sin configurar</>
-          )}
-        </div>
-
-        {/* ✅ Voz */}
-        <button
-          onClick={() => setAutoSpeak((v) => !v)}
-          style={{
-            padding: 12,
-            width: "100%",
-            borderRadius: 12,
-            border: `1px solid ${C.border}`,
-            background: "transparent",
-            color: C.text,
-            cursor: "pointer",
-            fontWeight: 900,
-          }}
-          title="Activar/desactivar voz"
-        >
-          🔊 Voz: {autoSpeak ? "ON" : "OFF"}
-        </button>
-
-        <div style={{ marginTop: "auto", display: "grid", gap: 10 }}>
-          <button
-            onClick={clearConversation}
+    <main style={{ height: "100vh", background: C.bg, color: C.text }}>
+      {/* Layout: desktop con sidebar, mobile sin sidebar */}
+      <div style={{ height: "100%", display: "flex" }}>
+        {/* Sidebar (solo desktop) */}
+        {!isMobile && (
+          <aside
             style={{
-              padding: 12,
-              width: "100%",
-              borderRadius: 12,
-              border: `1px solid ${C.border}`,
-              background: "transparent",
-              color: C.text,
-              cursor: "pointer",
-              fontWeight: 900,
+              width: 320,
+              borderRight: `1px solid ${C.border}`,
+              padding: 14,
+              background: C.panel,
+              display: "flex",
+              flexDirection: "column",
+              gap: 12,
             }}
           >
-            Borrar historial
-          </button>
+            <div
+              style={{
+                width: "100%",
+                border: `1px solid ${C.border}`,
+                borderRadius: 16,
+                background: "rgba(255,255,255,0.04)",
+                padding: 14,
+                display: "grid",
+                placeItems: "center",
+              }}
+            >
+              <img src="/auriona-logo.png" alt="Auriona" style={{ width: "100%", maxWidth: 240, height: 70, objectFit: "contain" }} />
+            </div>
 
-          <button
-            onClick={async () => {
-              await supabase.auth.signOut();
-              window.location.href = "/login";
-            }}
+            <button onClick={useMyLocation} style={topBtnStyle} title="Usar mi ubicación">
+              📍 Usar mi ubicación
+            </button>
+
+            <div style={{ fontSize: 12, color: C.muted }}>
+              {loc.lat != null && loc.lon != null ? (
+                <>
+                  Ubicación lista: {loc.lat.toFixed(3)}, {loc.lon.toFixed(3)}
+                </>
+              ) : (
+                <>Ubicación: sin configurar</>
+              )}
+            </div>
+
+            <button onClick={() => setAutoSpeak((v) => !v)} style={topBtnStyle} title="Voz">
+              🔊 Voz: {autoSpeak ? "ON" : "OFF"}
+            </button>
+
+            <div style={{ marginTop: "auto", display: "grid", gap: 10 }}>
+              <button onClick={clearConversation} style={topBtnStyle}>
+                Borrar historial
+              </button>
+
+              <button onClick={signOut} style={topBtnStyle}>
+                Cerrar sesión
+              </button>
+            </div>
+          </aside>
+        )}
+
+        {/* Main */}
+        <section style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+          {/* Header responsive */}
+          <header
             style={{
-              padding: 12,
-              width: "100%",
-              borderRadius: 12,
-              border: `1px solid ${C.border}`,
-              background: "transparent",
-              color: C.text,
-              cursor: "pointer",
-              fontWeight: 900,
+              padding: isMobile ? "10px 12px" : 14,
+              borderBottom: `1px solid ${C.border}`,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 10,
+              background: "rgba(11,15,23,0.7)",
+              backdropFilter: "blur(8px)",
             }}
           >
-            Cerrar sesión
-          </button>
-        </div>
-      </aside>
+            {/* Left: menu en mobile */}
+            <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+              {isMobile && (
+                <button onClick={() => setShowMenu((v) => !v)} style={topBtnStyle} aria-label="Menu">
+                  ☰
+                </button>
+              )}
 
-      {/* Chat */}
-      <section style={{ flex: 1, display: "flex", flexDirection: "column" }}>
-        <header
-          style={{
-            padding: 14,
-            borderBottom: `1px solid ${C.border}`,
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            gap: 10,
-            background: "rgba(11,15,23,0.7)",
-            backdropFilter: "blur(8px)",
-          }}
-        >
-          <div style={{ fontWeight: 900 }}>{title}</div>
-          <div style={{ fontSize: 12, color: C.muted }}>Beta</div>
-        </header>
+              <img src="/auriona-logo.png" alt="Auriona" style={logoStyle} />
+            </div>
 
-        <div style={{ flex: 1, padding: 18, overflowY: "auto" }}>
-          {msgs.map((m, i) => {
-            const isUser = m.role === "user";
-            return (
-              <div key={i} style={{ display: "flex", justifyContent: isUser ? "flex-end" : "flex-start", marginBottom: 12 }}>
-                <div
-                  style={{
-                    maxWidth: 760,
-                    padding: "10px 12px",
-                    borderRadius: 16,
-                    border: `1px solid ${C.border}`,
-                    background: isUser ? "rgba(255,255,255,0.06)" : "rgba(255,255,255,0.03)",
-                    whiteSpace: "pre-wrap",
-                    lineHeight: 1.35,
-                  }}
-                >
-                  {m.text}
-                </div>
+            {/* Right: acciones (desktop solo muestra Beta) */}
+            <div style={{ fontSize: 12, color: C.muted, whiteSpace: "nowrap" }}>Beta</div>
+          </header>
+
+          {/* Panel móvil (cuando abre ☰) */}
+          {isMobile && showMenu && (
+            <div
+              style={{
+                borderBottom: `1px solid ${C.border}`,
+                background: C.panel,
+                padding: 12,
+                display: "grid",
+                gap: 10,
+              }}
+            >
+              <button onClick={useMyLocation} style={topBtnStyle}>
+                📍 Usar mi ubicación
+              </button>
+
+              <div style={{ fontSize: 12, color: C.muted }}>
+                {loc.lat != null && loc.lon != null ? (
+                  <>
+                    Ubicación lista: {loc.lat.toFixed(3)}, {loc.lon.toFixed(3)}
+                  </>
+                ) : (
+                  <>Ubicación: sin configurar</>
+                )}
               </div>
-            );
-          })}
-          <div ref={bottomRef} />
-        </div>
 
-        <footer style={{ padding: 16, borderTop: `1px solid ${C.border}`, display: "flex", gap: 10, background: C.panel }}>
-          {/* 🎤 Push-to-talk */}
-          <button
-            onPointerDown={(e) => {
-              e.preventDefault();
-              micStart();
-            }}
-            onPointerUp={(e) => {
-              e.preventDefault();
-              micStop();
-            }}
-            onPointerCancel={(e) => {
-              e.preventDefault();
-              micStop();
-            }}
-            onPointerLeave={(e) => {
-              e.preventDefault();
-              micStop();
-            }}
-            style={{
-              padding: "12px 14px",
-              borderRadius: 14,
-              border: `1px solid ${C.border}`,
-              background: listening ? "rgba(255,255,255,0.10)" : "transparent",
-              color: C.text,
-              cursor: "pointer",
-              fontWeight: 900,
-              minWidth: 54,
-              userSelect: "none",
-              touchAction: "none",
-            }}
-            title="Mantener apretado para hablar"
-          >
-            {listening ? "🎙️" : "🎤"}
-          </button>
+              <button onClick={() => setAutoSpeak((v) => !v)} style={topBtnStyle}>
+                🔊 Voz: {autoSpeak ? "ON" : "OFF"}
+              </button>
 
-          <input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder={lang === "en" ? "Type or hold the mic…" : lang === "pt" ? "Digite ou segure o microfone…" : "Escribí o mantené apretado el mic…"}
-            onKeyDown={(e) => e.key === "Enter" && send()}
+              <button onClick={clearConversation} style={topBtnStyle}>
+                Borrar historial
+              </button>
+
+              <button onClick={signOut} style={topBtnStyle}>
+                Cerrar sesión
+              </button>
+            </div>
+          )}
+
+          {/* Messages area */}
+          <div
             style={{
               flex: 1,
-              padding: 12,
-              borderRadius: 14,
-              border: `1px solid ${C.border}`,
-              background: "transparent",
-              color: C.text,
-              outline: "none",
-            }}
-          />
-
-          <button
-            onClick={send}
-            disabled={busy}
-            style={{
-              padding: "12px 14px",
-              borderRadius: 14,
-              border: `1px solid ${C.border}`,
-              background: busy ? "transparent" : C.panel2,
-              color: C.text,
-              cursor: busy ? "not-allowed" : "pointer",
-              fontWeight: 900,
-              minWidth: 92,
+              padding: isMobile ? 12 : 18,
+              overflowY: "auto",
+              minWidth: 0,
             }}
           >
-            {busy ? "..." : lang === "en" ? "Send" : lang === "pt" ? "Enviar" : "Enviar"}
-          </button>
-        </footer>
-      </section>
+            {msgs.map((m, i) => {
+              const isUser = m.role === "user";
+              return (
+                <div key={i} style={{ display: "flex", justifyContent: isUser ? "flex-end" : "flex-start", marginBottom: 12 }}>
+                  <div
+                    style={{
+                      maxWidth: isMobile ? "92%" : 760,
+                      padding: "10px 12px",
+                      borderRadius: 16,
+                      border: `1px solid ${C.border}`,
+                      background: isUser ? "rgba(255,255,255,0.06)" : "rgba(255,255,255,0.03)",
+                      whiteSpace: "pre-wrap",
+                      lineHeight: 1.35,
+                      wordBreak: "break-word",
+                    }}
+                  >
+                    {m.text}
+                  </div>
+                </div>
+              );
+            })}
+            <div ref={bottomRef} />
+          </div>
+
+          {/* Footer input */}
+          <footer
+            style={{
+              padding: isMobile ? 10 : 16,
+              borderTop: `1px solid ${C.border}`,
+              display: "flex",
+              gap: 10,
+              background: C.panel,
+              alignItems: "center",
+            }}
+          >
+            <button
+              onPointerDown={(e) => {
+                e.preventDefault();
+                micStart();
+              }}
+              onPointerUp={(e) => {
+                e.preventDefault();
+                micStop();
+              }}
+              onPointerCancel={(e) => {
+                e.preventDefault();
+                micStop();
+              }}
+              onPointerLeave={(e) => {
+                e.preventDefault();
+                micStop();
+              }}
+              style={{
+                padding: "12px 14px",
+                borderRadius: 14,
+                border: `1px solid ${C.border}`,
+                background: listening ? "rgba(255,255,255,0.10)" : "transparent",
+                color: C.text,
+                cursor: "pointer",
+                fontWeight: 900,
+                minWidth: 54,
+                userSelect: "none",
+                touchAction: "none",
+                flex: "0 0 auto",
+              }}
+              title="Mantener apretado para hablar"
+            >
+              {listening ? "🎙️" : "🎤"}
+            </button>
+
+            <input
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder={lang === "en" ? "Type or hold the mic…" : lang === "pt" ? "Digite ou segure o microfone…" : "Escribí o mantené apretado el mic…"}
+              onKeyDown={(e) => e.key === "Enter" && send()}
+              style={{
+                flex: 1,
+                minWidth: 0,
+                padding: 12,
+                borderRadius: 14,
+                border: `1px solid ${C.border}`,
+                background: "transparent",
+                color: C.text,
+                outline: "none",
+              }}
+            />
+
+            <button
+              onClick={send}
+              disabled={busy}
+              style={{
+                padding: "12px 14px",
+                borderRadius: 14,
+                border: `1px solid ${C.border}`,
+                background: busy ? "transparent" : C.panel2,
+                color: C.text,
+                cursor: busy ? "not-allowed" : "pointer",
+                fontWeight: 900,
+                minWidth: isMobile ? 74 : 92,
+                flex: "0 0 auto",
+              }}
+            >
+              {busy ? "..." : lang === "en" ? "Send" : "Enviar"}
+            </button>
+          </footer>
+        </section>
+      </div>
     </main>
   );
 }
