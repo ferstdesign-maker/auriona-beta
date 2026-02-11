@@ -34,6 +34,18 @@ export default function AppPage() {
   const [isMobile, setIsMobile] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
 
+  // ✅ teclado (Android): cuánto “sube” el footer
+  const [kbOffset, setKbOffset] = useState(0);
+
+  // ✅ medir alturas reales
+  const headerRef = useRef<HTMLDivElement | null>(null);
+  const footerRef = useRef<HTMLDivElement | null>(null);
+  const [headerH, setHeaderH] = useState(64);
+  const [footerH, setFooterH] = useState(90);
+
+  const scrollerRef = useRef<HTMLDivElement | null>(null);
+  const bottomRef = useRef<HTMLDivElement | null>(null);
+
   const title = useMemo(() => "Auriona", []);
 
   const C = {
@@ -45,14 +57,6 @@ export default function AppPage() {
     muted: "rgba(255,255,255,0.65)",
     soft: "rgba(255,255,255,0.06)",
   };
-
-  // refs para scroll y tamaños
-  const scrollerRef = useRef<HTMLDivElement | null>(null);
-  const bottomRef = useRef<HTMLDivElement | null>(null);
-  const footerRef = useRef<HTMLDivElement | null>(null);
-
-  // padding inferior del chat (para que no lo tape el footer)
-  const [bottomPad, setBottomPad] = useState(120);
 
   function getStoredLang(): Lang {
     const v = (typeof window !== "undefined" && localStorage.getItem("auri_lang")) || "es";
@@ -77,7 +81,18 @@ export default function AppPage() {
     localStorage.setItem("auri_loc", JSON.stringify(next));
   }
 
-  // init stored lang/loc
+  function scrollToBottom(instant: boolean) {
+    bottomRef.current?.scrollIntoView({ behavior: instant ? "auto" : "smooth", block: "end" });
+  }
+
+  function measureBars() {
+    const hh = Math.ceil(headerRef.current?.getBoundingClientRect?.().height ?? 64);
+    const fh = Math.ceil(footerRef.current?.getBoundingClientRect?.().height ?? 90);
+    setHeaderH(hh);
+    setFooterH(fh);
+  }
+
+  // init stored data
   useEffect(() => {
     setLang(getStoredLang());
     setLoc(getStoredLoc());
@@ -89,22 +104,50 @@ export default function AppPage() {
       const m = window.innerWidth < 900;
       setIsMobile(m);
       if (!m) setShowMenu(false);
-      measureFooter();
-      // al resize (incluye teclado en algunos browsers), bajamos al final
+      measureBars();
       scrollToBottom(true);
     }
-
     window.addEventListener("resize", onResize);
     onResize();
     return () => window.removeEventListener("resize", onResize);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // cuando cambia el texto del input, puede cambiar el footer height en móviles
+  // ✅ Android keyboard handler (visualViewport)
   useEffect(() => {
-    measureFooter();
+    function updateKeyboardOffset() {
+      const vv = window.visualViewport;
+      if (!vv) {
+        setKbOffset(0);
+        return;
+      }
+      // cuánto “recorta” el teclado al viewport visible
+      const offset = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
+      setKbOffset(offset);
+      // al aparecer teclado, mantenemos el final visible
+      setTimeout(() => scrollToBottom(true), 30);
+      setTimeout(() => measureBars(), 30);
+    }
+
+    const vv = window.visualViewport;
+    if (!vv) return;
+
+    vv.addEventListener("resize", updateKeyboardOffset);
+    vv.addEventListener("scroll", updateKeyboardOffset); // algunos android lo disparan así
+    updateKeyboardOffset();
+
+    return () => {
+      vv.removeEventListener("resize", updateKeyboardOffset);
+      vv.removeEventListener("scroll", updateKeyboardOffset);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [input, isMobile, showMenu]);
+  }, []);
+
+  // re-medimos barras cuando cambia input (puede crecer)
+  useEffect(() => {
+    measureBars();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [input, showMenu, isMobile]);
 
   // auth + load
   useEffect(() => {
@@ -126,7 +169,6 @@ export default function AppPage() {
       }
 
       await loadMainConversation();
-      // al cargar, al final
       setTimeout(() => scrollToBottom(true), 50);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -137,18 +179,6 @@ export default function AppPage() {
     scrollToBottom(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [msgs]);
-
-  function measureFooter() {
-    const h = footerRef.current?.getBoundingClientRect?.().height ?? 96;
-    // 18 extra para “aire”
-    setBottomPad(Math.ceil(h + 18));
-  }
-
-  function scrollToBottom(instant: boolean) {
-    // usa anchor al final
-    if (!bottomRef.current) return;
-    bottomRef.current.scrollIntoView({ behavior: instant ? "auto" : "smooth", block: "end" });
-  }
 
   // speech recognition init
   useEffect(() => {
@@ -179,7 +209,6 @@ export default function AppPage() {
 
     rec.onerror = () => setListening(false);
     rec.onend = () => setListening(false);
-
     recRef.current = rec;
   }, [lang]);
 
@@ -192,17 +221,13 @@ export default function AppPage() {
       window.speechSynthesis.cancel();
       const u = new SpeechSynthesisUtterance(text);
       u.lang = lang === "pt" ? "pt-BR" : lang === "en" ? "en-US" : "es-AR";
-
       const voices = window.speechSynthesis.getVoices?.() || [];
       const preferred =
         voices.find((v) => v.lang.toLowerCase() === u.lang.toLowerCase()) ||
-        voices.find((v) => v.lang.toLowerCase().startsWith(u.lang.slice(0, 2).toLowerCase())) ||
-        voices.find((v) => /es|pt|en/i.test(v.lang));
-
+        voices.find((v) => v.lang.toLowerCase().startsWith(u.lang.slice(0, 2).toLowerCase()));
       if (preferred) u.voice = preferred;
       u.rate = 1.02;
       u.pitch = 1.02;
-
       window.speechSynthesis.speak(u);
     } catch {}
   }
@@ -213,7 +238,7 @@ export default function AppPage() {
       .select("role, content, created_at")
       .is("conversation_id", null)
       .order("created_at", { ascending: true })
-      .limit(500);
+      .limit(350);
 
     if (error) {
       setMsgs([{ role: "auri", text: `No pude cargar el historial: ${error.message}` }]);
@@ -247,7 +272,7 @@ export default function AppPage() {
   }
 
   async function clearConversation() {
-    const ok = window.confirm(lang === "en" ? "Delete the full history?" : lang === "pt" ? "Apagar todo o histórico?" : "¿Borrar todo el historial?");
+    const ok = window.confirm(lang === "en" ? "Delete full history?" : lang === "pt" ? "Apagar histórico?" : "¿Borrar historial?");
     if (!ok) return;
 
     const { data } = await supabase.auth.getUser();
@@ -264,13 +289,7 @@ export default function AppPage() {
       return;
     }
 
-    const txt =
-      lang === "en"
-        ? `Done ${callUser}. Fresh start.`
-        : lang === "pt"
-        ? `Pronto ${callUser}. Começamos do zero.`
-        : `Listo ${callUser}. Empezamos de cero.`;
-
+    const txt = lang === "en" ? `Done ${callUser}.` : lang === "pt" ? `Pronto ${callUser}.` : `Listo ${callUser}.`;
     setMsgs([{ role: "auri", text: txt }]);
     speak(txt);
     setShowMenu(false);
@@ -280,7 +299,7 @@ export default function AppPage() {
   function micStart() {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR || !recRef.current) {
-      alert(lang === "en" ? "Dictation not supported. Try Chrome/Edge." : "Tu navegador no soporta dictado. Probá Chrome o Edge.");
+      alert(lang === "en" ? "Dictation not supported." : "Dictado no soportado.");
       return;
     }
     if (listening) return;
@@ -301,7 +320,7 @@ export default function AppPage() {
   }
 
   function useMyLocation() {
-    if (typeof navigator === "undefined" || !navigator.geolocation) {
+    if (!navigator.geolocation) {
       alert(lang === "en" ? "Geolocation not available." : "Geolocalización no disponible.");
       return;
     }
@@ -313,9 +332,7 @@ export default function AppPage() {
         storeLoc(next);
         setShowMenu(false);
       },
-      () => {
-        alert(lang === "en" ? "Location permission denied." : lang === "pt" ? "Permissão negada." : "Permiso de ubicación denegado.");
-      },
+      () => alert(lang === "en" ? "Location denied." : "Ubicación denegada."),
       { enableHighAccuracy: true, timeout: 12000 }
     );
   }
@@ -327,7 +344,6 @@ export default function AppPage() {
     setInput("");
     setMsgs((m) => [...m, { role: "user", text }]);
     setBusy(true);
-
     await saveMessage("user", text);
 
     try {
@@ -348,14 +364,13 @@ export default function AppPage() {
       setMsgs((m) => [...m, { role: "auri", text: reply }]);
       await saveMessage("auri", reply);
       speak(reply);
-
-      setTimeout(() => scrollToBottom(false), 50);
+      setTimeout(() => scrollToBottom(true), 40);
     } catch {
-      const fallback = lang === "en" ? "Connection problem." : lang === "pt" ? "Problema de conexão." : "Tuve un problema de conexión.";
+      const fallback = lang === "en" ? "Connection problem." : "Problema de conexión.";
       setMsgs((m) => [...m, { role: "auri", text: fallback }]);
       await saveMessage("auri", fallback);
       speak(fallback);
-      setTimeout(() => scrollToBottom(false), 50);
+      setTimeout(() => scrollToBottom(true), 40);
     } finally {
       setBusy(false);
     }
@@ -378,23 +393,42 @@ export default function AppPage() {
     fontSize: 13,
   };
 
-  // ✅ logo centrado siempre en mobile
-  const headerCenterLogo = (
-    <div style={{ display: "flex", justifyContent: "center", alignItems: "center", flex: 1 }}>
-      <img src="/auriona-logo.png" alt="Auriona" style={{ width: isMobile ? 210 : 240, height: isMobile ? 48 : 60, objectFit: "contain" }} />
-    </div>
-  );
+  // ✅ fijos: header arriba, footer abajo (y footer sube con kbOffset)
+  const fixedHeaderStyle: React.CSSProperties = {
+    position: "fixed",
+    top: 0,
+    left: isMobile ? 0 : 320,
+    right: 0,
+    zIndex: 50,
+    padding: isMobile ? "10px 12px" : 14,
+    borderBottom: `1px solid ${C.border}`,
+    background: "rgba(11,15,23,0.92)",
+    backdropFilter: "blur(8px)",
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+  };
+
+  const fixedFooterStyle: React.CSSProperties = {
+    position: "fixed",
+    left: isMobile ? 0 : 320,
+    right: 0,
+    bottom: kbOffset, // ✅ se sube cuando aparece teclado
+    zIndex: 60,
+    padding: isMobile ? 10 : 16,
+    borderTop: `1px solid ${C.border}`,
+    background: "rgba(15,22,38,0.98)",
+    display: "flex",
+    gap: 10,
+    alignItems: "center",
+  };
+
+  // ✅ área scroll: ocupa todo entre header y footer (más teclado)
+  const contentTop = headerH;
+  const contentBottom = footerH + kbOffset;
 
   return (
-    <main
-      style={{
-        // ✅ 100dvh mejora con teclado móvil
-        height: "100dvh",
-        background: C.bg,
-        color: C.text,
-        overflow: "hidden",
-      }}
-    >
+    <main style={{ height: "100vh", background: C.bg, color: C.text, overflow: "hidden" }}>
       <div style={{ height: "100%", display: "flex" }}>
         {/* Sidebar desktop */}
         {!isMobile && (
@@ -453,32 +487,22 @@ export default function AppPage() {
           </aside>
         )}
 
-        {/* Main */}
-        <section style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
-          {/* ✅ Header sticky siempre visible */}
-          <header
-            style={{
-              position: "sticky",
-              top: 0,
-              zIndex: 50,
-              padding: isMobile ? "10px 12px" : 14,
-              borderBottom: `1px solid ${C.border}`,
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-              background: "rgba(11,15,23,0.92)",
-              backdropFilter: "blur(8px)",
-            }}
-          >
+        {/* Main column */}
+        <section style={{ flex: 1, minWidth: 0 }}>
+          {/* ✅ HEADER FIXED */}
+          <div ref={headerRef} style={fixedHeaderStyle}>
             {isMobile ? (
               <>
                 <button onClick={() => setShowMenu((v) => !v)} style={topBtnStyle} aria-label="Menu">
                   ☰
                 </button>
 
-                {headerCenterLogo}
+                {/* logo centrado */}
+                <div style={{ display: "flex", justifyContent: "center", flex: 1 }}>
+                  <img src="/auriona-logo.png" alt="Auriona" style={{ width: 210, height: 48, objectFit: "contain" }} />
+                </div>
 
-                <div style={{ width: 44 }} /> {/* espaciador para centrar logo */}
+                <div style={{ width: 44 }} />
               </>
             ) : (
               <>
@@ -486,11 +510,24 @@ export default function AppPage() {
                 <div style={{ marginLeft: "auto", fontSize: 12, color: C.muted }}>Beta</div>
               </>
             )}
-          </header>
+          </div>
 
-          {/* Menú móvil desplegable */}
+          {/* ✅ MENU móvil (debajo del header, dentro del flujo scroll para no tapar) */}
           {isMobile && showMenu && (
-            <div style={{ borderBottom: `1px solid ${C.border}`, background: C.panel, padding: 12, display: "grid", gap: 10 }}>
+            <div
+              style={{
+                position: "fixed",
+                top: headerH,
+                left: 0,
+                right: 0,
+                zIndex: 55,
+                borderBottom: `1px solid ${C.border}`,
+                background: C.panel,
+                padding: 12,
+                display: "grid",
+                gap: 10,
+              }}
+            >
               <button onClick={useMyLocation} style={topBtnStyle}>
                 📍 Usar mi ubicación
               </button>
@@ -519,15 +556,17 @@ export default function AppPage() {
             </div>
           )}
 
-          {/* ✅ Scroller (chat) con padding inferior dinámico para que teclado/footer no tape */}
+          {/* ✅ SCROLLER (entre header y footer) */}
           <div
             ref={scrollerRef}
             style={{
-              flex: 1,
+              position: "absolute",
+              top: contentTop + (isMobile && showMenu ? 230 : 0), // menu ocupa altura aprox; simplificado
+              left: isMobile ? 0 : 320,
+              right: 0,
+              bottom: contentBottom,
               overflowY: "auto",
               padding: isMobile ? 12 : 18,
-              paddingBottom: bottomPad,
-              minWidth: 0,
               WebkitOverflowScrolling: "touch",
             }}
           >
@@ -555,21 +594,8 @@ export default function AppPage() {
             <div ref={bottomRef} />
           </div>
 
-          {/* ✅ Footer sticky: siempre visible; no tapa el chat porque el scroller tiene paddingBottom */}
-          <div
-            ref={footerRef}
-            style={{
-              position: "sticky",
-              bottom: 0,
-              zIndex: 60,
-              padding: isMobile ? 10 : 16,
-              borderTop: `1px solid ${C.border}`,
-              display: "flex",
-              gap: 10,
-              background: "rgba(15,22,38,0.98)",
-              alignItems: "center",
-            }}
-          >
+          {/* ✅ FOOTER FIXED (y sube con el teclado) */}
+          <div ref={footerRef} style={fixedFooterStyle}>
             <button
               onPointerDown={(e) => {
                 e.preventDefault();
@@ -608,7 +634,7 @@ export default function AppPage() {
             <input
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              onFocus={() => setTimeout(() => scrollToBottom(true), 80)} // ✅ cuando abre teclado
+              onFocus={() => setTimeout(() => scrollToBottom(true), 40)}
               placeholder={lang === "en" ? "Type or hold the mic…" : lang === "pt" ? "Digite ou segure o microfone…" : "Escribí o mantené apretado el mic…"}
               onKeyDown={(e) => e.key === "Enter" && send()}
               style={{
