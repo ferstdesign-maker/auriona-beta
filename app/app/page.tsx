@@ -22,8 +22,9 @@ export default function AppPage() {
   // onboarding metadata
   const [callUser, setCallUser] = useState("amiga/o");
   const [callAssistant, setCallAssistant] = useState("Auri");
+  const [autoSpeak, setAutoSpeak] = useState(true);
 
-  // dictado
+  // dictado (push-to-talk)
   const [listening, setListening] = useState(false);
   const recRef = useRef<any>(null);
 
@@ -52,6 +53,12 @@ export default function AppPage() {
       setCallAssistant(meta.call_assistant || "Auri");
 
       await loadMainConversation();
+
+      // si no hizo onboarding, lo mandamos
+      if (!meta.onboarded) {
+        window.location.href = "/onboarding";
+        return;
+      }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -60,8 +67,8 @@ export default function AppPage() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [msgs]);
 
+  // SpeechRecognition init
   useEffect(() => {
-    // inicializa SpeechRecognition si existe
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) return;
 
@@ -89,16 +96,41 @@ export default function AppPage() {
       });
     };
 
-    rec.onerror = () => {
-      setListening(false);
-    };
-
-    rec.onend = () => {
-      setListening(false);
-    };
+    rec.onerror = () => setListening(false);
+    rec.onend = () => setListening(false);
 
     recRef.current = rec;
   }, []);
+
+  function speak(text: string) {
+    try {
+      if (!autoSpeak) return;
+      if (typeof window === "undefined") return;
+      if (!("speechSynthesis" in window)) return;
+
+      // corta cualquier voz previa
+      window.speechSynthesis.cancel();
+
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = "es-AR";
+
+      // intentamos elegir una voz española/latam si existe
+      const voices = window.speechSynthesis.getVoices?.() || [];
+      const preferred =
+        voices.find((v) => /es-AR/i.test(v.lang)) ||
+        voices.find((v) => /es-(ES|MX|US|CL|CO|UY|PE|AR)/i.test(v.lang)) ||
+        voices.find((v) => /es/i.test(v.lang));
+
+      if (preferred) u.voice = preferred;
+
+      u.rate = 1.02;
+      u.pitch = 1.02;
+
+      window.speechSynthesis.speak(u);
+    } catch {
+      // si falla, no rompemos la app
+    }
+  }
 
   async function loadMainConversation() {
     const { data: rows, error } = await supabase
@@ -114,12 +146,8 @@ export default function AppPage() {
     }
 
     if (!rows || rows.length === 0) {
-      setMsgs([
-        {
-          role: "auri",
-          text: `Hola ${callUser}. Soy ${callAssistant}. Estoy acá para ayudarte a pensar mejor, ordenar ideas y decidir con calma.\n\n¿Arrancamos?`,
-        },
-      ]);
+      const hello = `Hola ${callUser}. Soy ${callAssistant}. Estoy acá para ayudarte a pensar mejor, ordenar ideas y decidir con calma.\n\n¿Arrancamos?`;
+      setMsgs([{ role: "auri", text: hello }]);
       return;
     }
 
@@ -130,14 +158,12 @@ export default function AppPage() {
     const { data } = await supabase.auth.getUser();
     if (!data.user) return;
 
-    const { error } = await supabase.from("messages").insert({
+    await supabase.from("messages").insert({
       user_id: data.user.id,
       role,
       content,
       conversation_id: null,
     });
-
-    if (error) console.log("DB insert error:", error.message);
   }
 
   async function clearConversation() {
@@ -158,12 +184,9 @@ export default function AppPage() {
       return;
     }
 
-    setMsgs([
-      {
-        role: "auri",
-        text: `Listo ${callUser}. Empezamos de cero.\n\n¿Con qué te doy una mano hoy?`,
-      },
-    ]);
+    const txt = `Listo ${callUser}. Empezamos de cero.\n\n¿Con qué te doy una mano hoy?`;
+    setMsgs([{ role: "auri", text: txt }]);
+    speak(txt);
   }
 
   function micStart() {
@@ -172,13 +195,10 @@ export default function AppPage() {
       alert("Tu navegador no soporta dictado. Probá Chrome o Edge.");
       return;
     }
-
-    // ya está escuchando → no reiniciar
     if (listening) return;
-
     setListening(true);
     try {
-      recRef.current.start(); // requiere “gesto del usuario” (apretar botón)
+      recRef.current.start(); // requiere gesto (apretar)
     } catch {
       setListening(false);
     }
@@ -223,10 +243,14 @@ export default function AppPage() {
 
       setMsgs((m) => [...m, { role: "auri", text: reply }]);
       await saveMessage("auri", reply);
+
+      // ✅ habla
+      speak(reply);
     } catch {
       const fallback = "Tuve un problema de conexión.";
       setMsgs((m) => [...m, { role: "auri", text: fallback }]);
       await saveMessage("auri", fallback);
+      speak(fallback);
     } finally {
       setBusy(false);
     }
@@ -234,7 +258,6 @@ export default function AppPage() {
 
   return (
     <main style={{ height: "100vh", display: "flex", background: C.bg, color: C.text }}>
-      {/* Sidebar */}
       <aside
         style={{
           width: 320,
@@ -265,10 +288,25 @@ export default function AppPage() {
         </div>
 
         <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.4 }}>
-          Modo conversación única.
-          <br />
-          (El historial existe, pero no se muestra en carpetas.)
+          Conversación única (sin carpetas).
         </div>
+
+        <button
+          onClick={() => setAutoSpeak((v) => !v)}
+          style={{
+            padding: 12,
+            width: "100%",
+            borderRadius: 12,
+            border: `1px solid ${C.border}`,
+            background: "transparent",
+            color: C.text,
+            cursor: "pointer",
+            fontWeight: 800,
+          }}
+          title="Activar/desactivar voz"
+        >
+          Voz: {autoSpeak ? "ON" : "OFF"}
+        </button>
 
         <div style={{ marginTop: "auto", display: "grid", gap: 10 }}>
           <button
@@ -283,7 +321,6 @@ export default function AppPage() {
               cursor: "pointer",
               fontWeight: 800,
             }}
-            title="Borrar historial (beta)"
           >
             Borrar historial
           </button>
@@ -303,14 +340,12 @@ export default function AppPage() {
               cursor: "pointer",
               fontWeight: 800,
             }}
-            title="Cerrar sesión"
           >
             Cerrar sesión
           </button>
         </div>
       </aside>
 
-      {/* Chat */}
       <section style={{ flex: 1, display: "flex", flexDirection: "column" }}>
         <header
           style={{
@@ -332,14 +367,7 @@ export default function AppPage() {
           {msgs.map((m, i) => {
             const isUser = m.role === "user";
             return (
-              <div
-                key={i}
-                style={{
-                  display: "flex",
-                  justifyContent: isUser ? "flex-end" : "flex-start",
-                  marginBottom: 12,
-                }}
-              >
+              <div key={i} style={{ display: "flex", justifyContent: isUser ? "flex-end" : "flex-start", marginBottom: 12 }}>
                 <div
                   style={{
                     maxWidth: 760,
@@ -360,7 +388,6 @@ export default function AppPage() {
         </div>
 
         <footer style={{ padding: 16, borderTop: `1px solid ${C.border}`, display: "flex", gap: 10, background: C.panel }}>
-          {/* 🎤 Push-to-talk */}
           <button
             onPointerDown={(e) => {
               e.preventDefault();
