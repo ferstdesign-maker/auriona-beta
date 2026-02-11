@@ -122,7 +122,6 @@ export default function AppPage() {
   async function autoTitleConversationIfNeeded(firstUserMessage: string, convId: string) {
     if (convId === "legacy") return;
 
-    // Re-leer el título desde Supabase (más confiable que state)
     const { data: row } = await supabase
       .from("conversations")
       .select("title")
@@ -132,7 +131,6 @@ export default function AppPage() {
     const currentTitle = String((row as any)?.title ?? "");
     if (currentTitle && currentTitle !== "Nueva conversación") return;
 
-    // pedir título
     const r = await fetch("/api/title", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -152,8 +150,6 @@ export default function AppPage() {
 
     const convId = activeConvId;
 
-    // Detectar "primer mensaje" de esta conversación con una regla simple:
-    // Si el chat tiene 0 mensajes o solo 1 mensaje de Auriona "Arranquemos..."
     const looksEmpty =
       msgs.length === 0 ||
       (msgs.length === 1 && msgs[0].role === "auri" && msgs[0].text.includes("Arranquemos"));
@@ -164,7 +160,6 @@ export default function AppPage() {
 
     await saveMessage("user", text, convId);
 
-    // Titular (en paralelo) SOLO si parece primer mensaje
     if (looksEmpty) autoTitleConversationIfNeeded(text, convId);
 
     try {
@@ -261,8 +256,31 @@ export default function AppPage() {
       </aside>
 
       <section style={{ flex: 1, display: "flex", flexDirection: "column" }}>
-        <header style={{ padding: 14, borderBottom: "1px solid #e5e7eb", fontWeight: 700 }}>
-          {activeTitle}
+        {/* HEADER CON BOTÓN ARRIBA */}
+        <header
+          style={{
+            padding: 14,
+            borderBottom: "1px solid #e5e7eb",
+            fontWeight: 700,
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 10,
+          }}
+        >
+          <div>{activeTitle}</div>
+
+          <button
+            onClick={createConversation}
+            style={{
+              padding: "8px 10px",
+              borderRadius: 10,
+              border: "1px solid #e5e7eb",
+              cursor: "pointer",
+            }}
+          >
+            + Nuevo chat
+          </button>
         </header>
 
         <div style={{ flex: 1, padding: 16, overflowY: "auto" }}>
