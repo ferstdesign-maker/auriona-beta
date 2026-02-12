@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { supabase } from "../../lib/supabase";
+import { supabase } from "@/lib/supabaseClient";
 
 type Lang = "es" | "pt" | "en";
+type Geo = { lat: number; lon: number };
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -15,6 +16,9 @@ export default function LoginPage() {
   // ✅ nuevos checks
   const [isAdult, setIsAdult] = useState(false);
   const [acceptTerms, setAcceptTerms] = useState(false);
+
+  // ✅ ubicación en login
+  const [geo, setGeo] = useState<Geo | null>(null);
 
   const C = {
     bg: "#0b0f17",
@@ -31,7 +35,7 @@ export default function LoginPage() {
       password: "contraseña",
       login: "Ingresar",
       signup: "Registrarme",
-      created: "Registro creado — ahora ingresá.",
+      created: "Mensaje enviado. Revisá tu correo.",
       missing: "Completá email y contraseña.",
       termsTitle: "Apto +18",
       termsLine1: "Confirmo que soy mayor de 18 años.",
@@ -40,13 +44,18 @@ export default function LoginPage() {
       termsLine2c: "y la Política de Privacidad.",
       needChecks: "Para continuar, confirmá +18 y aceptá términos.",
       errorTitle: "Error",
+      geoBtn: "Usar mi ubicación",
+      geoOk: "Ubicación lista ✅",
+      geoFail: "No pude obtener tu ubicación.",
+      geoNo: "Ubicación no disponible.",
+      wait: "Un segundo…",
     },
     pt: {
       email: "seu@email.com",
       password: "senha",
       login: "Entrar",
       signup: "Criar conta",
-      created: "Conta criada — agora faça login.",
+      created: "Mensagem enviada. Verifique seu e-mail.",
       missing: "Preencha email e senha.",
       termsTitle: "Apto 18+",
       termsLine1: "Confirmo que tenho mais de 18 anos.",
@@ -55,13 +64,18 @@ export default function LoginPage() {
       termsLine2c: "e a Política de Privacidade.",
       needChecks: "Para continuar, confirme 18+ e aceite os termos.",
       errorTitle: "Erro",
+      geoBtn: "Usar minha localização",
+      geoOk: "Localização pronta ✅",
+      geoFail: "Não consegui obter sua localização.",
+      geoNo: "Localização indisponível.",
+      wait: "Um instante…",
     },
     en: {
       email: "you@email.com",
       password: "password",
       login: "Sign in",
       signup: "Create account",
-      created: "Account created — now sign in.",
+      created: "Message sent. Check your email.",
       missing: "Fill email and password.",
       termsTitle: "18+ only",
       termsLine1: "I confirm I’m over 18 years old.",
@@ -70,12 +84,29 @@ export default function LoginPage() {
       termsLine2c: "and Privacy Policy.",
       needChecks: "To continue, confirm 18+ and accept terms.",
       errorTitle: "Error",
+      geoBtn: "Use my location",
+      geoOk: "Location ready ✅",
+      geoFail: "I couldn’t get your location.",
+      geoNo: "Location not available.",
+      wait: "One sec…",
     },
   }[lang];
 
   useEffect(() => {
+    // ✅ si ya está logueado, directo al chat
+    supabase.auth.getSession().then(({ data }) => {
+      if (data.session) window.location.href = "/app";
+    });
+
+    // idioma guardado
     const saved = localStorage.getItem("auri_lang") as Lang | null;
     if (saved === "es" || saved === "pt" || saved === "en") setLang(saved);
+
+    // ubicación guardada
+    try {
+      const raw = localStorage.getItem("auriona_geo");
+      if (raw) setGeo(JSON.parse(raw));
+    } catch {}
   }, []);
 
   function setLangAndSave(l: Lang) {
@@ -95,6 +126,29 @@ export default function LoginPage() {
     } as const;
   }
 
+  function saveGeo(g: Geo) {
+    setGeo(g);
+    try {
+      localStorage.setItem("auriona_geo", JSON.stringify(g));
+    } catch {}
+  }
+
+  function useMyLocation() {
+    if (!navigator.geolocation) return alert(t.geoNo);
+    setBusy(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        saveGeo({ lat: pos.coords.latitude, lon: pos.coords.longitude });
+        setBusy(false);
+      },
+      () => {
+        setBusy(false);
+        alert(t.geoFail);
+      },
+      { enableHighAccuracy: true, timeout: 8000 }
+    );
+  }
+
   const canContinue = isAdult && acceptTerms && !!email && !!password && !busy;
 
   async function login() {
@@ -108,7 +162,7 @@ export default function LoginPage() {
 
     if (error) return alert(`${t.errorTitle}: ${error.message}`);
 
-    // guardamos consentimiento “rápido” en metadata (ledger lo hacemos en Supabase luego)
+    // guardamos consentimiento en metadata
     await supabase.auth.updateUser({ data: { lang, is_adult: true, accepted_terms: true } });
 
     window.location.href = "/app";
@@ -130,6 +184,7 @@ export default function LoginPage() {
 
     if (error) return alert(`${t.errorTitle}: ${error.message}`);
 
+    // ✅ mensaje correcto (corto, humano)
     alert(t.created);
   }
 
@@ -224,6 +279,24 @@ export default function LoginPage() {
             {showPass ? "🙈" : "👁"}
           </button>
         </div>
+
+        {/* ✅ Botón ubicación en LOGIN */}
+        <button
+          onClick={useMyLocation}
+          disabled={busy}
+          style={{
+            padding: 12,
+            borderRadius: 12,
+            border: `1px solid ${C.border}`,
+            background: geo ? C.soft : "transparent",
+            color: C.text,
+            fontWeight: 900,
+            cursor: busy ? "not-allowed" : "pointer",
+            opacity: busy ? 0.7 : 1,
+          }}
+        >
+          {busy ? t.wait : geo ? t.geoOk : t.geoBtn}
+        </button>
 
         {/* ✅ +18 + TyC */}
         <div
