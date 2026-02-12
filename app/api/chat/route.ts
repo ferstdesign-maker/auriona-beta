@@ -13,7 +13,6 @@ const POLICY_URL =
 
 const MARKER = "MARKER_API_2026_02_12";
 
-// ✅ Pre-check (Gobernanza) — se ejecuta ANTES de llamar al LLM
 async function auriPolicyCheck(args: {
   user_message: string;
   conversation_id?: string;
@@ -33,7 +32,6 @@ async function auriPolicyCheck(args: {
     }),
   });
 
-  // Fail-safe: si policy falla, bloqueamos (mejor seguro)
   if (!res.ok) {
     return {
       action: "block",
@@ -46,43 +44,62 @@ async function auriPolicyCheck(args: {
   return await res.json();
 }
 
+// ✅ Detecta consultas que NECESITAN web (local/actualidad/compra)
 function needsWeb(message: string) {
   const m = message.toLowerCase();
 
-  // ✅ “Alta sensibilidad a actualidad / ubicación / compra / horarios”
-  // Mantengo tu lista y la refuerzo un poco sin volverla loca.
   const triggers = [
-    "clima",
-    "tiempo",
-    "pronóstico",
-    "precio",
-    "cuánto sale",
-    "dólar",
-    "cotización",
-    "noticias",
-    "último",
-    "hoy",
-    "mañana",
-    "ayer",
+    // local / dónde / cerca
+    "donde",
     "dónde",
-    "dirección",
+    "acá",
+    "aca",
+    "aquí",
+    "aqui",
     "cerca",
+    "cerca de mi",
     "cerca de mí",
-    "comprar",
-    "vender",
+    "alrededor",
+    "dirección",
+    "direccion",
+    "teléfono",
+    "telefono",
+    "whatsapp",
     "horario",
     "abierto",
     "cerrado",
-    "trelew",
+    // compra / disponibilidad
+    "comprar",
+    "conseguir",
+    "venden",
+    "venda",
+    "venta",
+    "precio",
+    "cuánto",
+    "cuanto",
+    // actualidad / noticias / clima
+    "clima",
+    "tiempo",
+    "pronóstico",
+    "pronostico",
+    "noticias",
+    "hoy",
+    "mañana",
+    "ayer",
   ];
 
   return triggers.some((t) => m.includes(t));
 }
 
-async function createResponseWithFallback(params: any) {
+async function createResponseWithFallback(params: any, requireWebTool: boolean) {
   const preferred = process.env.OPENAI_MODEL?.trim();
 
-  const models = [preferred, "gpt-5-mini", "gpt-4o-mini"].filter(Boolean);
+  // ✅ IMPORTANTÍSIMO:
+  // Cuando NECESITAMOS web_search, evitamos modelos que pueden no soportar/hacer tool correctamente.
+  // Priorizamos modelos “grandes”/modernos, y dejamos mini como último recurso.
+  const models = requireWebTool
+    ? [preferred, "gpt-5", "gpt-4o", "gpt-5-mini"].filter(Boolean)
+    : [preferred, "gpt-5-mini", "gpt-4o-mini"].filter(Boolean);
 
   let lastErr: any = null;
 
@@ -101,20 +118,21 @@ async function createResponseWithFallback(params: any) {
   throw lastErr;
 }
 
-function clampReply(text: string) {
+// ✅ Recorta “paredes” si el modelo se pasa
+function clampReply(text: string, hardMax: number) {
   const t = (text || "").trim();
   if (!t) return t;
-
-  // ✅ “corta de verdad”: máximo 2 saltos de línea, sin paredes de texto.
-  // Si el modelo se pasa, lo recortamos de forma segura.
-  // (No toca el sentido, solo corta longitud extrema).
-  const hardMax = 520; // ~3-5 líneas en móvil
   if (t.length <= hardMax) return t;
 
-  // Recorte suave hasta el último punto cercano
   const slice = t.slice(0, hardMax);
-  const lastPeriod = Math.max(slice.lastIndexOf("."), slice.lastIndexOf("?"), slice.lastIndexOf("!"));
-  if (lastPeriod > 220) return slice.slice(0, lastPeriod + 1).trim();
+  const lastStop = Math.max(
+    slice.lastIndexOf("."),
+    slice.lastIndexOf("?"),
+    slice.lastIndexOf("!"),
+    slice.lastIndexOf("\n")
+  );
+
+  if (lastStop > Math.floor(hardMax * 0.6)) return slice.slice(0, lastStop + 1).trim();
   return slice.trim();
 }
 
@@ -128,11 +146,10 @@ export async function POST(req: Request) {
     const profile = body.profile ?? {};
     const location = body.location ?? {};
 
-    // ✅ IDs simples
     const conversation_id = String(body.conversation_id ?? "web");
     const user_id = String(body.user_id ?? "anon");
 
-    // ✅ Policy pre-check ANTES de OpenAI
+    // ✅ Policy pre-check
     const policy = await auriPolicyCheck({
       user_message: message,
       conversation_id,
@@ -141,7 +158,6 @@ export async function POST(req: Request) {
       policy_version: "0.0.1",
     });
 
-    // Si no es allow: devolvemos plantilla segura y NO llamamos al LLM
     if (policy?.action && policy.action !== "allow") {
       return NextResponse.json({
         reply: String(policy.reply ?? "No puedo ayudar con eso."),
@@ -157,30 +173,40 @@ export async function POST(req: Request) {
       });
     }
 
-    // ✅ System prompt más “humano”, ultra breve y no robótico
-    // Clave: reglas duras de longitud + 1 pregunta al final
-    const system = `
-Sos Auriona (Auri): cálida, simple y MUY humana. Nada robótico.
+    const useWeb = needsWeb(message);
 
-REGLAS DURAS (cumplir siempre):
-- Respuesta corta: 1 a 3 frases. Máximo 55 palabras.
-- Cero listas largas. Si hace falta enumerar, como máximo 2 ítems en la misma línea.
-- Sin preámbulos tipo "Claro" o "Por supuesto". Ir directo.
-- No repetir la pregunta del usuario.
-- No “clases” ni textos largos.
-- 1 sola pregunta al final para avanzar (siempre).
-- No inventar datos. Si no sabés, decís "no lo sé".
-- Salud/ley/finanzas: info general + sugerir profesional si aplica.
+    // ✅ System prompt: dos modos (normal vs web)
+    const system = useWeb
+      ? `
+Sos Auriona (Auri), cálida, humana y directa.
 
-WEB:
-- Si el usuario pide datos actuales/locales (clima, noticias, horarios, precios, direcciones, etc.), usar web_search.
+MODO WEB (OBLIGATORIO):
+- Tenés que usar web_search (sí o sí) para responder.
+- No inventes NADA (ni nombres de negocios, ni direcciones).
+- Devolvé 2 a 3 opciones reales.
+- Para cada opción: Nombre + Dirección + Teléfono (si aparece) + Horario (si aparece).
+- Si web_search no devuelve datos suficientes: decí "No encontré resultados confiables" y pedí ciudad/barrio exacto (1 pregunta).
+- NO mandes al usuario a "Googlear". Vos resolvés con web_search.
 
-IDIOMA:
-- Español rioplatense (voseo) si lang=es.
-- pt-BR si lang=pt.
-- en-US si lang=en.
+Formato:
+- 2–3 líneas por opción, bien corto.
+- 1 sola pregunta al final.
 
-Contexto:
+Idioma: ${lang}
+Usuario: ${profile.callUser ?? "amiga/o"}
+Tu nombre: ${profile.callAssistant ?? "Auri"}
+Ubicación: lat=${location.lat ?? "?"}, lon=${location.lon ?? "?"}
+`.trim()
+      : `
+Sos Auriona (Auri), cálida y MUY humana. Nada robótico.
+
+Reglas:
+- Respuesta corta: 1 a 3 frases.
+- Sin listas largas.
+- 1 sola pregunta al final.
+- No inventes.
+- Salud/ley/finanzas: general + sugerir profesional si aplica.
+
 Idioma: ${lang}
 Usuario: ${profile.callUser ?? "amiga/o"}
 Tu nombre: ${profile.callAssistant ?? "Auri"}
@@ -198,27 +224,27 @@ Ubicación: lat=${location.lat ?? "?"}, lon=${location.lon ?? "?"}
       { role: "user" as const, content: message },
     ];
 
-    const useWeb = needsWeb(message);
-
+    // ✅ Params: si hay web, damos un poco más de tokens para dirección/teléfono/horario
     const params: any = {
       input: messages,
-      temperature: 0.25,          // ✅ menos divague
-      max_output_tokens: 95,      // ✅ ultra corto real
+      temperature: useWeb ? 0.2 : 0.25,
+      max_output_tokens: useWeb ? 220 : 110,
       store: false,
     };
 
     if (useWeb) {
       params.tools = [{ type: "web_search" }];
-      params.tool_choice = "auto";
+      // ✅ clave: forzamos que use el tool
+      params.tool_choice = { type: "web_search" };
     }
 
-    const resp = await createResponseWithFallback(params);
+    const resp = await createResponseWithFallback(params, useWeb);
 
     const outText = (resp as any).output_text ?? "";
     const replyRaw = outText.trim() || "No pude responder ahora. ¿Querés que lo intentemos de nuevo?";
 
-    // ✅ “corta de verdad” por si el modelo se pasa
-    const reply = clampReply(replyRaw);
+    // ✅ recorte: más permisivo en modo web
+    const reply = clampReply(replyRaw, useWeb ? 900 : 520);
 
     return NextResponse.json({
       reply,
@@ -228,7 +254,6 @@ Ubicación: lat=${location.lat ?? "?"}, lon=${location.lon ?? "?"}
     });
   } catch (e: any) {
     const msg = e?.message || e?.error?.message || "Error desconocido";
-
     console.error("API /chat error:", e);
 
     return NextResponse.json(
