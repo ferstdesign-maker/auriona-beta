@@ -28,6 +28,7 @@ export default function AppPage() {
   const [listening, setListening] = useState(false);
   const recRef = useRef<any>(null);
 
+  // ✅ La ubicación ahora se toma del LOGIN (localStorage) sin botón en el chat
   const [loc, setLoc] = useState<LocationState>({ lat: null, lon: null });
 
   const [isMobile, setIsMobile] = useState(false);
@@ -60,21 +61,26 @@ export default function AppPage() {
     return "es";
   }
 
+  // ✅ Nuevo: leemos primero la key del LOGIN "auriona_geo"
+  // ✅ Fallback: si existía la key vieja "auri_loc", la toma también.
   function getStoredLoc(): LocationState {
     if (typeof window === "undefined") return { lat: null, lon: null };
-    const raw = localStorage.getItem("auri_loc");
-    if (!raw) return { lat: null, lon: null };
-    try {
-      const j = JSON.parse(raw);
-      return { lat: typeof j.lat === "number" ? j.lat : null, lon: typeof j.lon === "number" ? j.lon : null };
-    } catch {
-      return { lat: null, lon: null };
-    }
-  }
 
-  function storeLoc(next: LocationState) {
-    if (typeof window === "undefined") return;
-    localStorage.setItem("auri_loc", JSON.stringify(next));
+    const tryRead = (key: string): LocationState | null => {
+      const raw = localStorage.getItem(key);
+      if (!raw) return null;
+      try {
+        const j = JSON.parse(raw);
+        const lat = typeof j.lat === "number" ? j.lat : null;
+        const lon = typeof j.lon === "number" ? j.lon : null;
+        if (lat === null || lon === null) return { lat: null, lon: null };
+        return { lat, lon };
+      } catch {
+        return null;
+      }
+    };
+
+    return tryRead("auriona_geo") ?? tryRead("auri_loc") ?? { lat: null, lon: null };
   }
 
   function scrollToBottom(instant: boolean) {
@@ -139,6 +145,13 @@ export default function AppPage() {
     measureBars();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [input, showMenu, isMobile]);
+
+  // ✅ Si el usuario cambia la ubicación desde login (otra sesión),
+  // este effect la vuelve a leer al montar.
+  useEffect(() => {
+    setLoc(getStoredLoc());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -214,7 +227,14 @@ export default function AppPage() {
 
       const isFemaleName = (name: string) => {
         const n = lower(name);
-        return n.includes("female") || n.includes("mujer") || n.includes("woman") || n.includes("paulina") || n.includes("sofia") || n.includes("lucia");
+        return (
+          n.includes("female") ||
+          n.includes("mujer") ||
+          n.includes("woman") ||
+          n.includes("paulina") ||
+          n.includes("sofia") ||
+          n.includes("lucia")
+        );
       };
 
       // 1) es-AR female
@@ -323,24 +343,6 @@ export default function AppPage() {
     }
   }
 
-  function useMyLocation() {
-    if (!navigator.geolocation) {
-      alert("Geolocalización no disponible.");
-      return;
-    }
-
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const next = { lat: pos.coords.latitude, lon: pos.coords.longitude };
-        setLoc(next);
-        storeLoc(next);
-        setShowMenu(false);
-      },
-      () => alert("Permiso de ubicación denegado."),
-      { enableHighAccuracy: true, timeout: 12000 }
-    );
-  }
-
   async function send() {
     const text = input.trim();
     if (!text || busy) return;
@@ -356,10 +358,20 @@ export default function AppPage() {
         content: m.text,
       }));
 
+      // ✅ Enviamos ubicación SOLO si está completa (lat/lon)
+      const safeLocation =
+        typeof loc?.lat === "number" && typeof loc?.lon === "number" ? loc : {};
+
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text, history, lang, location: loc, profile: { callUser, callAssistant } }),
+        body: JSON.stringify({
+          message: text,
+          history,
+          lang,
+          location: safeLocation,
+          profile: { callUser, callAssistant },
+        }),
       });
 
       const data = await res.json();
@@ -455,12 +467,14 @@ export default function AppPage() {
                 placeItems: "center",
               }}
             >
-              <img src="/auriona-logo.png" alt="Auriona" style={{ width: "100%", maxWidth: 240, height: 70, objectFit: "contain" }} />
+              <img
+                src="/auriona-logo.png"
+                alt="Auriona"
+                style={{ width: "100%", maxWidth: 240, height: 70, objectFit: "contain" }}
+              />
             </div>
 
-            <button onClick={useMyLocation} style={topBtnStyle}>
-              📍 Usar mi ubicación
-            </button>
+            {/* ✅ Botón de ubicación ELIMINADO */}
 
             <button onClick={() => setAutoSpeak((v) => !v)} style={topBtnStyle}>
               🔊 Voz: {autoSpeak ? "ON" : "OFF"}
@@ -514,9 +528,8 @@ export default function AppPage() {
                 gap: 10,
               }}
             >
-              <button onClick={useMyLocation} style={topBtnStyle}>
-                📍 Usar mi ubicación
-              </button>
+              {/* ✅ Botón de ubicación ELIMINADO */}
+
               <button onClick={() => setAutoSpeak((v) => !v)} style={topBtnStyle}>
                 🔊 Voz: {autoSpeak ? "ON" : "OFF"}
               </button>
@@ -544,7 +557,14 @@ export default function AppPage() {
             {msgs.map((m, i) => {
               const isUser = m.role === "user";
               return (
-                <div key={i} style={{ display: "flex", justifyContent: isUser ? "flex-end" : "flex-start", marginBottom: 12 }}>
+                <div
+                  key={i}
+                  style={{
+                    display: "flex",
+                    justifyContent: isUser ? "flex-end" : "flex-start",
+                    marginBottom: 12,
+                  }}
+                >
                   <div
                     style={{
                       maxWidth: isMobile ? "92%" : 760,

@@ -39,7 +39,7 @@ async function auriPolicyCheck(args: {
       action: "block",
       risk_level: "high",
       reason_codes: ["POLICY_UNAVAILABLE"],
-      reply: "No puedo procesar esto ahora. Probá de nuevo en un momento.",
+      reply: "Ahora no puedo procesar eso. Probá de nuevo en un momento.",
     };
   }
 
@@ -48,21 +48,34 @@ async function auriPolicyCheck(args: {
 
 function needsWeb(message: string) {
   const m = message.toLowerCase();
+
+  // ✅ “Alta sensibilidad a actualidad / ubicación / compra / horarios”
+  // Mantengo tu lista y la refuerzo un poco sin volverla loca.
   const triggers = [
     "clima",
     "tiempo",
     "pronóstico",
     "precio",
+    "cuánto sale",
     "dólar",
+    "cotización",
     "noticias",
+    "último",
     "hoy",
     "mañana",
+    "ayer",
     "dónde",
     "dirección",
+    "cerca",
+    "cerca de mí",
     "comprar",
+    "vender",
     "horario",
+    "abierto",
+    "cerrado",
     "trelew",
   ];
+
   return triggers.some((t) => m.includes(t));
 }
 
@@ -88,6 +101,23 @@ async function createResponseWithFallback(params: any) {
   throw lastErr;
 }
 
+function clampReply(text: string) {
+  const t = (text || "").trim();
+  if (!t) return t;
+
+  // ✅ “corta de verdad”: máximo 2 saltos de línea, sin paredes de texto.
+  // Si el modelo se pasa, lo recortamos de forma segura.
+  // (No toca el sentido, solo corta longitud extrema).
+  const hardMax = 520; // ~3-5 líneas en móvil
+  if (t.length <= hardMax) return t;
+
+  // Recorte suave hasta el último punto cercano
+  const slice = t.slice(0, hardMax);
+  const lastPeriod = Math.max(slice.lastIndexOf("."), slice.lastIndexOf("?"), slice.lastIndexOf("!"));
+  if (lastPeriod > 220) return slice.slice(0, lastPeriod + 1).trim();
+  return slice.trim();
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json();
@@ -98,12 +128,11 @@ export async function POST(req: Request) {
     const profile = body.profile ?? {};
     const location = body.location ?? {};
 
-    // ✅ IDs simples (no te rompo nada)
-    // Si después tenés auth real, acá metemos el user_id real.
+    // ✅ IDs simples
     const conversation_id = String(body.conversation_id ?? "web");
     const user_id = String(body.user_id ?? "anon");
 
-    // ✅ PASO 10: Policy pre-check ANTES de OpenAI
+    // ✅ Policy pre-check ANTES de OpenAI
     const policy = await auriPolicyCheck({
       user_message: message,
       conversation_id,
@@ -128,26 +157,34 @@ export async function POST(req: Request) {
       });
     }
 
+    // ✅ System prompt más “humano”, ultra breve y no robótico
+    // Clave: reglas duras de longitud + 1 pregunta al final
     const system = `
-Sos Auriona (Auri), asistente cálida y humana.
+Sos Auriona (Auri): cálida, simple y MUY humana. Nada robótico.
 
-Reglas:
-- Respondé breve.
-- Frases cortas.
-- Nada robotizado.
-- Sin listas largas.
-- 1 pregunta al final.
-- Tono rioplatense amigable.
-- Si requiere datos actuales/locales → usá web search.
-- No inventes.
-- Salud → consejos generales + sugerir profesional si aplica.
+REGLAS DURAS (cumplir siempre):
+- Respuesta corta: 1 a 3 frases. Máximo 55 palabras.
+- Cero listas largas. Si hace falta enumerar, como máximo 2 ítems en la misma línea.
+- Sin preámbulos tipo "Claro" o "Por supuesto". Ir directo.
+- No repetir la pregunta del usuario.
+- No “clases” ni textos largos.
+- 1 sola pregunta al final para avanzar (siempre).
+- No inventar datos. Si no sabés, decís "no lo sé".
+- Salud/ley/finanzas: info general + sugerir profesional si aplica.
 
+WEB:
+- Si el usuario pide datos actuales/locales (clima, noticias, horarios, precios, direcciones, etc.), usar web_search.
+
+IDIOMA:
+- Español rioplatense (voseo) si lang=es.
+- pt-BR si lang=pt.
+- en-US si lang=en.
+
+Contexto:
 Idioma: ${lang}
 Usuario: ${profile.callUser ?? "amiga/o"}
 Tu nombre: ${profile.callAssistant ?? "Auri"}
 Ubicación: lat=${location.lat ?? "?"}, lon=${location.lon ?? "?"}
-
-Estilo: conversación natural, como hablar con un amigo.
 `.trim();
 
     const messages = [
@@ -165,8 +202,8 @@ Estilo: conversación natural, como hablar con un amigo.
 
     const params: any = {
       input: messages,
-      temperature: 0.35,
-      max_output_tokens: 140,
+      temperature: 0.25,          // ✅ menos divague
+      max_output_tokens: 95,      // ✅ ultra corto real
       store: false,
     };
 
@@ -178,7 +215,10 @@ Estilo: conversación natural, como hablar con un amigo.
     const resp = await createResponseWithFallback(params);
 
     const outText = (resp as any).output_text ?? "";
-    const reply = outText.trim() || "No pude responder ahora, intentemos de nuevo.";
+    const replyRaw = outText.trim() || "No pude responder ahora. ¿Querés que lo intentemos de nuevo?";
+
+    // ✅ “corta de verdad” por si el modelo se pasa
+    const reply = clampReply(replyRaw);
 
     return NextResponse.json({
       reply,
