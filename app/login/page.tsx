@@ -43,7 +43,6 @@ export default function LoginPage() {
       errorTitle: "Error",
       geoFail: "No pude obtener tu ubicación.",
       geoNo: "Ubicación no disponible.",
-      marker: "LOGIN v3 (CHECKS OK)",
       termsLink: "Términos y Condiciones",
       privacyLink: "Política de Privacidad",
     },
@@ -59,7 +58,6 @@ export default function LoginPage() {
       errorTitle: "Erro",
       geoFail: "Não consegui obter sua localização.",
       geoNo: "Localização indisponível.",
-      marker: "LOGIN v3 (CHECKS OK)",
       termsLink: "Termos e Condições",
       privacyLink: "Política de Privacidade",
     },
@@ -75,7 +73,6 @@ export default function LoginPage() {
       errorTitle: "Error",
       geoFail: "I couldn’t get your location.",
       geoNo: "Location not available.",
-      marker: "LOGIN v3 (CHECKS OK)",
       termsLink: "Terms & Conditions",
       privacyLink: "Privacy Policy",
     },
@@ -123,7 +120,7 @@ export default function LoginPage() {
     } catch {}
   }
 
-  // ✅ pedir ubicación cuando se tilda "USAR MI UBICACIÓN"
+  // ✅ pedir ubicación cuando se tilda "usar mi ubicación"
   function requestGeo() {
     if (!navigator.geolocation) {
       alert(t.geoNo);
@@ -223,7 +220,6 @@ export default function LoginPage() {
       >
         <div style={{ display: "grid", placeItems: "center" }}>
           <img src="/auriona-logo.png" alt="Auriona" style={{ width: 220, objectFit: "contain" }} />
-          <div style={{ marginTop: 8, fontSize: 12, color: C.muted }}>{t.marker}</div>
         </div>
 
         {/* BANDERAS */}
@@ -310,7 +306,7 @@ export default function LoginPage() {
             </span>
           </label>
 
-          {/* USAR MI UBICACIÓN: checkbox (NO botón) */}
+          {/* Ubicación: mismo estilo que políticas (sin mayúsculas, sin negrita) */}
           <label style={{ display: "flex", gap: 10, alignItems: "center", color: C.text }}>
             <input
               type="checkbox"
@@ -325,8 +321,8 @@ export default function LoginPage() {
                 }
               }}
             />
-            <span style={{ fontWeight: 900, letterSpacing: 0.6 }}>
-              USAR MI UBICACIÓN {geo ? "✅" : ""}
+            <span style={{ fontSize: 13, color: C.muted }}>
+              Usar mi ubicación {geo ? "✅" : ""}
             </span>
           </label>
 
