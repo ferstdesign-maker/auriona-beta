@@ -13,11 +13,12 @@ export default function LoginPage() {
   const [busy, setBusy] = useState(false);
   const [lang, setLang] = useState<Lang>("es");
 
-  // ✅ checks
+  // ✅ checkboxes (nuevo orden)
   const [isAdult, setIsAdult] = useState(false);
+  const [useGeo, setUseGeo] = useState(false);
   const [acceptTerms, setAcceptTerms] = useState(false);
+  const [acceptPrivacy, setAcceptPrivacy] = useState(false);
 
-  // ✅ GPS en LOGIN
   const [geo, setGeo] = useState<Geo | null>(null);
 
   const C = {
@@ -35,24 +36,16 @@ export default function LoginPage() {
       password: "contraseña",
       login: "Ingresar",
       signup: "Registrarme",
-      // ✅ CAMBIO 1: mensaje correcto post registro
       created: "Mensaje enviado. Revisá tu correo.",
       missing: "Completá email y contraseña.",
-      termsTitle: "Apto +18",
-      termsLine1: "Confirmo que soy mayor de 18 años.",
-      termsLine2a: "Acepto los",
-      termsLine2b: "Términos y Condiciones",
-      termsLine2c: "y la Política de Privacidad.",
-      needChecks: "Para continuar, confirmá +18 y aceptá términos.",
+      needAdult: "Confirmá +18 para continuar.",
+      needLegal: "Aceptá Términos y Política para continuar.",
       errorTitle: "Error",
-      // ✅ textos GPS
-      geoBtn: "Usar mi ubicación",
-      geoOk: "Ubicación lista ✅",
       geoFail: "No pude obtener tu ubicación.",
       geoNo: "Ubicación no disponible.",
-      wait: "...",
-      // ✅ marker para verificar que estás viendo el login nuevo
-      marker: "LOGIN v2 (GPS OK)",
+      marker: "LOGIN v3 (CHECKS OK)",
+      termsLink: "Términos y Condiciones",
+      privacyLink: "Política de Privacidad",
     },
     pt: {
       email: "seu@email.com",
@@ -61,19 +54,14 @@ export default function LoginPage() {
       signup: "Criar conta",
       created: "Mensagem enviada. Verifique seu e-mail.",
       missing: "Preencha email e senha.",
-      termsTitle: "Apto 18+",
-      termsLine1: "Confirmo que tenho mais de 18 anos.",
-      termsLine2a: "Aceito os",
-      termsLine2b: "Termos e Condições",
-      termsLine2c: "e a Política de Privacidade.",
-      needChecks: "Para continuar, confirme 18+ e aceite os termos.",
+      needAdult: "Confirme 18+ para continuar.",
+      needLegal: "Aceite Termos e Política para continuar.",
       errorTitle: "Erro",
-      geoBtn: "Usar minha localização",
-      geoOk: "Localização pronta ✅",
       geoFail: "Não consegui obter sua localização.",
       geoNo: "Localização indisponível.",
-      wait: "...",
-      marker: "LOGIN v2 (GPS OK)",
+      marker: "LOGIN v3 (CHECKS OK)",
+      termsLink: "Termos e Condições",
+      privacyLink: "Política de Privacidade",
     },
     en: {
       email: "you@email.com",
@@ -82,24 +70,18 @@ export default function LoginPage() {
       signup: "Create account",
       created: "Message sent. Check your email.",
       missing: "Fill email and password.",
-      termsTitle: "18+ only",
-      termsLine1: "I confirm I’m over 18 years old.",
-      termsLine2a: "I accept the",
-      termsLine2b: "Terms & Conditions",
-      termsLine2c: "and Privacy Policy.",
-      needChecks: "To continue, confirm 18+ and accept terms.",
+      needAdult: "Confirm 18+ to continue.",
+      needLegal: "Accept Terms and Privacy to continue.",
       errorTitle: "Error",
-      geoBtn: "Use my location",
-      geoOk: "Location ready ✅",
       geoFail: "I couldn’t get your location.",
       geoNo: "Location not available.",
-      wait: "...",
-      marker: "LOGIN v2 (GPS OK)",
+      marker: "LOGIN v3 (CHECKS OK)",
+      termsLink: "Terms & Conditions",
+      privacyLink: "Privacy Policy",
     },
   }[lang];
 
   useEffect(() => {
-    // ✅ CAMBIO 3: si ya está logueado, directo al chat
     supabase.auth.getSession().then(({ data }) => {
       if (data.session) window.location.href = "/app";
     });
@@ -107,10 +89,13 @@ export default function LoginPage() {
     const saved = localStorage.getItem("auri_lang") as Lang | null;
     if (saved === "es" || saved === "pt" || saved === "en") setLang(saved);
 
-    // ✅ levantar ubicación guardada
     try {
       const raw = localStorage.getItem("auriona_geo");
-      if (raw) setGeo(JSON.parse(raw));
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        setGeo(parsed);
+        setUseGeo(true);
+      }
     } catch {}
   }, []);
 
@@ -138,9 +123,14 @@ export default function LoginPage() {
     } catch {}
   }
 
-  // ✅ CAMBIO 4: botón GPS en login
-  function useMyLocation() {
-    if (!navigator.geolocation) return alert(t.geoNo);
+  // ✅ pedir ubicación cuando se tilda "USAR MI UBICACIÓN"
+  function requestGeo() {
+    if (!navigator.geolocation) {
+      alert(t.geoNo);
+      setUseGeo(false);
+      return;
+    }
+
     setBusy(true);
     navigator.geolocation.getCurrentPosition(
       (pos) => {
@@ -150,16 +140,18 @@ export default function LoginPage() {
       () => {
         setBusy(false);
         alert(t.geoFail);
+        setUseGeo(false);
       },
       { enableHighAccuracy: true, timeout: 8000 }
     );
   }
 
-  const canContinue = isAdult && acceptTerms && !!email && !!password && !busy;
+  const canContinue = isAdult && acceptTerms && acceptPrivacy && !!email && !!password && !busy;
 
   async function login() {
     if (!email || !password) return alert(t.missing);
-    if (!isAdult || !acceptTerms) return alert(t.needChecks);
+    if (!isAdult) return alert(t.needAdult);
+    if (!acceptTerms || !acceptPrivacy) return alert(t.needLegal);
 
     setBusy(true);
     const { error } = await supabase.auth.signInWithPassword({ email, password });
@@ -167,26 +159,41 @@ export default function LoginPage() {
 
     if (error) return alert(`${t.errorTitle}: ${error.message}`);
 
-    await supabase.auth.updateUser({ data: { lang, is_adult: true, accepted_terms: true } });
+    await supabase.auth.updateUser({
+      data: {
+        lang,
+        is_adult: true,
+        accepted_terms: true,
+        accepted_privacy: true,
+        geo_opt_in: useGeo ? true : false,
+      },
+    });
 
     window.location.href = "/app";
   }
 
   async function register() {
     if (!email || !password) return alert(t.missing);
-    if (!isAdult || !acceptTerms) return alert(t.needChecks);
+    if (!isAdult) return alert(t.needAdult);
+    if (!acceptTerms || !acceptPrivacy) return alert(t.needLegal);
 
     setBusy(true);
     const { error } = await supabase.auth.signUp({
       email,
       password,
-      options: { data: { lang, is_adult: true, accepted_terms: true } },
+      options: {
+        data: {
+          lang,
+          is_adult: true,
+          accepted_terms: true,
+          accepted_privacy: true,
+          geo_opt_in: useGeo ? true : false,
+        },
+      },
     });
     setBusy(false);
 
     if (error) return alert(`${t.errorTitle}: ${error.message}`);
-
-    // ✅ CAMBIO 1 aplicado
     alert(t.created);
   }
 
@@ -216,7 +223,6 @@ export default function LoginPage() {
       >
         <div style={{ display: "grid", placeItems: "center" }}>
           <img src="/auriona-logo.png" alt="Auriona" style={{ width: 220, objectFit: "contain" }} />
-          {/* ✅ marker visual para confirmar que estás viendo el login nuevo */}
           <div style={{ marginTop: 8, fontSize: 12, color: C.muted }}>{t.marker}</div>
         </div>
 
@@ -284,25 +290,7 @@ export default function LoginPage() {
           </button>
         </div>
 
-        {/* ✅ BOTÓN GPS (nuevo) */}
-        <button
-          onClick={useMyLocation}
-          disabled={busy}
-          style={{
-            padding: 12,
-            borderRadius: 12,
-            border: `1px solid ${C.border}`,
-            background: geo ? C.soft : "transparent",
-            color: C.text,
-            fontWeight: 900,
-            cursor: busy ? "not-allowed" : "pointer",
-            opacity: busy ? 0.7 : 1,
-          }}
-        >
-          {busy ? t.wait : geo ? t.geoOk : t.geoBtn}
-        </button>
-
-        {/* ✅ +18 + TyC */}
+        {/* ✅ CHECKS arriba (orden de importancia) */}
         <div
           style={{
             border: `1px solid ${C.border}`,
@@ -313,21 +301,56 @@ export default function LoginPage() {
             gap: 10,
           }}
         >
-          <div style={{ fontWeight: 900, fontSize: 13, color: C.text }}>{t.termsTitle}</div>
-
-          <label style={{ display: "flex", gap: 10, alignItems: "flex-start", fontSize: 13, color: C.muted }}>
+          {/* +18 en grande y negrita, misma línea */}
+          <label style={{ display: "flex", gap: 10, alignItems: "center", color: C.text }}>
             <input type="checkbox" checked={isAdult} onChange={(e) => setIsAdult(e.target.checked)} />
-            <span>{t.termsLine1}</span>
+            <span style={{ fontWeight: 900, fontSize: 16 }}>+ 18</span>
+            <span style={{ fontWeight: 500, fontSize: 13, color: C.muted }}>
+              Confirmo que soy mayor de 18 años.
+            </span>
           </label>
 
-          <label style={{ display: "flex", gap: 10, alignItems: "flex-start", fontSize: 13, color: C.muted }}>
+          {/* USAR MI UBICACIÓN: checkbox (NO botón) */}
+          <label style={{ display: "flex", gap: 10, alignItems: "center", color: C.text }}>
+            <input
+              type="checkbox"
+              checked={useGeo}
+              onChange={(e) => {
+                const v = e.target.checked;
+                setUseGeo(v);
+                if (v) requestGeo();
+                if (!v) {
+                  setGeo(null);
+                  localStorage.removeItem("auriona_geo");
+                }
+              }}
+            />
+            <span style={{ fontWeight: 900, letterSpacing: 0.6 }}>
+              USAR MI UBICACIÓN {geo ? "✅" : ""}
+            </span>
+          </label>
+
+          {/* TyC */}
+          <label style={{ display: "flex", gap: 10, alignItems: "center", color: C.text }}>
             <input type="checkbox" checked={acceptTerms} onChange={(e) => setAcceptTerms(e.target.checked)} />
-            <span>
-              {t.termsLine2a}{" "}
+            <span style={{ fontSize: 13, color: C.muted }}>
+              Acepto los{" "}
               <a href="/terms" target="_blank" style={{ color: C.text, textDecoration: "underline" }}>
-                {t.termsLine2b}
-              </a>{" "}
-              {t.termsLine2c}
+                {t.termsLink}
+              </a>
+              .
+            </span>
+          </label>
+
+          {/* Privacidad */}
+          <label style={{ display: "flex", gap: 10, alignItems: "center", color: C.text }}>
+            <input type="checkbox" checked={acceptPrivacy} onChange={(e) => setAcceptPrivacy(e.target.checked)} />
+            <span style={{ fontSize: 13, color: C.muted }}>
+              Acepto la{" "}
+              <a href="/privacy" target="_blank" style={{ color: C.text, textDecoration: "underline" }}>
+                {t.privacyLink}
+              </a>
+              .
             </span>
           </label>
         </div>
