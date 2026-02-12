@@ -55,6 +55,14 @@ export default function AppPage() {
     soft: "rgba(255,255,255,0.06)",
   };
 
+  function stopSpeaking() {
+    try {
+      if (typeof window !== "undefined" && "speechSynthesis" in window) {
+        window.speechSynthesis.cancel();
+      }
+    } catch {}
+  }
+
   function getStoredLang(): Lang {
     const v = (typeof window !== "undefined" && localStorage.getItem("auri_lang")) || "es";
     if (v === "pt" || v === "en" || v === "es") return v;
@@ -215,7 +223,9 @@ export default function AppPage() {
       if (!("speechSynthesis" in window)) return;
 
       const targetLang = lang === "pt" ? "pt-BR" : lang === "en" ? "en-US" : "es-AR";
-      window.speechSynthesis.cancel();
+
+      // ✅ evita superposiciones
+      stopSpeaking();
 
       const u = new SpeechSynthesisUtterance(text);
       u.lang = targetLang;
@@ -237,16 +247,11 @@ export default function AppPage() {
         );
       };
 
-      // 1) es-AR female
       let v =
         voices.find((x) => lower(x.lang) === "es-ar" && isFemaleName(x.name)) ||
-        // 2) es-AR cualquiera
         voices.find((x) => lower(x.lang) === "es-ar") ||
-        // 3) es-* female
         voices.find((x) => lower(x.lang).startsWith("es") && isFemaleName(x.name)) ||
-        // 4) es-* cualquiera
         voices.find((x) => lower(x.lang).startsWith("es")) ||
-        // 5) cualquier female
         voices.find((x) => isFemaleName(x.name));
 
       if (v) u.voice = v;
@@ -327,6 +332,9 @@ export default function AppPage() {
       return;
     }
 
+    // ✅ si vas a hablar, cortamos TTS para que no se mezcle
+    stopSpeaking();
+
     if (!listening) {
       setListening(true);
       try {
@@ -358,7 +366,6 @@ export default function AppPage() {
         content: m.text,
       }));
 
-      // ✅ Enviamos ubicación SOLO si está completa (lat/lon)
       const safeLocation =
         typeof loc?.lat === "number" && typeof loc?.lon === "number" ? loc : {};
 
@@ -393,6 +400,7 @@ export default function AppPage() {
   }
 
   async function signOut() {
+    stopSpeaking();
     await supabase.auth.signOut();
     window.location.href = "/login";
   }
@@ -441,6 +449,15 @@ export default function AppPage() {
   const contentTop = headerH;
   const contentBottom = footerH + kbOffset;
 
+  // ✅ Toggle VOZ con corte inmediato
+  function toggleVoice() {
+    setAutoSpeak((v) => {
+      const next = !v;
+      if (!next) stopSpeaking(); // ✅ OFF => corta YA
+      return next;
+    });
+  }
+
   return (
     <main style={{ height: "100vh", background: C.bg, color: C.text, overflow: "hidden" }}>
       <div style={{ height: "100%", display: "flex" }}>
@@ -476,7 +493,7 @@ export default function AppPage() {
 
             {/* ✅ Botón de ubicación ELIMINADO */}
 
-            <button onClick={() => setAutoSpeak((v) => !v)} style={topBtnStyle}>
+            <button onClick={toggleVoice} style={topBtnStyle}>
               🔊 Voz: {autoSpeak ? "ON" : "OFF"}
             </button>
 
@@ -530,7 +547,7 @@ export default function AppPage() {
             >
               {/* ✅ Botón de ubicación ELIMINADO */}
 
-              <button onClick={() => setAutoSpeak((v) => !v)} style={topBtnStyle}>
+              <button onClick={toggleVoice} style={topBtnStyle}>
                 🔊 Voz: {autoSpeak ? "ON" : "OFF"}
               </button>
               <button onClick={clearConversation} style={topBtnStyle}>
@@ -557,14 +574,7 @@ export default function AppPage() {
             {msgs.map((m, i) => {
               const isUser = m.role === "user";
               return (
-                <div
-                  key={i}
-                  style={{
-                    display: "flex",
-                    justifyContent: isUser ? "flex-end" : "flex-start",
-                    marginBottom: 12,
-                  }}
-                >
+                <div key={i} style={{ display: "flex", justifyContent: isUser ? "flex-end" : "flex-start", marginBottom: 12 }}>
                   <div
                     style={{
                       maxWidth: isMobile ? "92%" : 760,
@@ -604,7 +614,6 @@ export default function AppPage() {
               }}
             />
 
-            {/* ✅ Mic a la derecha */}
             <button
               onClick={toggleMic}
               style={{
