@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { supabase } from "@/lib/supabaseClient";
+import { supabase } from "../../lib/supabase";
 
 type Lang = "es" | "pt" | "en";
 type Geo = { lat: number; lon: number };
@@ -13,11 +13,11 @@ export default function LoginPage() {
   const [busy, setBusy] = useState(false);
   const [lang, setLang] = useState<Lang>("es");
 
-  // ✅ nuevos checks
+  // ✅ checks
   const [isAdult, setIsAdult] = useState(false);
   const [acceptTerms, setAcceptTerms] = useState(false);
 
-  // ✅ ubicación en login
+  // ✅ GPS en LOGIN
   const [geo, setGeo] = useState<Geo | null>(null);
 
   const C = {
@@ -35,6 +35,7 @@ export default function LoginPage() {
       password: "contraseña",
       login: "Ingresar",
       signup: "Registrarme",
+      // ✅ CAMBIO 1: mensaje correcto post registro
       created: "Mensaje enviado. Revisá tu correo.",
       missing: "Completá email y contraseña.",
       termsTitle: "Apto +18",
@@ -44,11 +45,14 @@ export default function LoginPage() {
       termsLine2c: "y la Política de Privacidad.",
       needChecks: "Para continuar, confirmá +18 y aceptá términos.",
       errorTitle: "Error",
+      // ✅ textos GPS
       geoBtn: "Usar mi ubicación",
       geoOk: "Ubicación lista ✅",
       geoFail: "No pude obtener tu ubicación.",
       geoNo: "Ubicación no disponible.",
-      wait: "Un segundo…",
+      wait: "...",
+      // ✅ marker para verificar que estás viendo el login nuevo
+      marker: "LOGIN v2 (GPS OK)",
     },
     pt: {
       email: "seu@email.com",
@@ -68,7 +72,8 @@ export default function LoginPage() {
       geoOk: "Localização pronta ✅",
       geoFail: "Não consegui obter sua localização.",
       geoNo: "Localização indisponível.",
-      wait: "Um instante…",
+      wait: "...",
+      marker: "LOGIN v2 (GPS OK)",
     },
     en: {
       email: "you@email.com",
@@ -88,21 +93,21 @@ export default function LoginPage() {
       geoOk: "Location ready ✅",
       geoFail: "I couldn’t get your location.",
       geoNo: "Location not available.",
-      wait: "One sec…",
+      wait: "...",
+      marker: "LOGIN v2 (GPS OK)",
     },
   }[lang];
 
   useEffect(() => {
-    // ✅ si ya está logueado, directo al chat
+    // ✅ CAMBIO 3: si ya está logueado, directo al chat
     supabase.auth.getSession().then(({ data }) => {
       if (data.session) window.location.href = "/app";
     });
 
-    // idioma guardado
     const saved = localStorage.getItem("auri_lang") as Lang | null;
     if (saved === "es" || saved === "pt" || saved === "en") setLang(saved);
 
-    // ubicación guardada
+    // ✅ levantar ubicación guardada
     try {
       const raw = localStorage.getItem("auriona_geo");
       if (raw) setGeo(JSON.parse(raw));
@@ -133,6 +138,7 @@ export default function LoginPage() {
     } catch {}
   }
 
+  // ✅ CAMBIO 4: botón GPS en login
   function useMyLocation() {
     if (!navigator.geolocation) return alert(t.geoNo);
     setBusy(true);
@@ -156,13 +162,11 @@ export default function LoginPage() {
     if (!isAdult || !acceptTerms) return alert(t.needChecks);
 
     setBusy(true);
-
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     setBusy(false);
 
     if (error) return alert(`${t.errorTitle}: ${error.message}`);
 
-    // guardamos consentimiento en metadata
     await supabase.auth.updateUser({ data: { lang, is_adult: true, accepted_terms: true } });
 
     window.location.href = "/app";
@@ -173,18 +177,16 @@ export default function LoginPage() {
     if (!isAdult || !acceptTerms) return alert(t.needChecks);
 
     setBusy(true);
-
     const { error } = await supabase.auth.signUp({
       email,
       password,
       options: { data: { lang, is_adult: true, accepted_terms: true } },
     });
-
     setBusy(false);
 
     if (error) return alert(`${t.errorTitle}: ${error.message}`);
 
-    // ✅ mensaje correcto (corto, humano)
+    // ✅ CAMBIO 1 aplicado
     alert(t.created);
   }
 
@@ -214,6 +216,8 @@ export default function LoginPage() {
       >
         <div style={{ display: "grid", placeItems: "center" }}>
           <img src="/auriona-logo.png" alt="Auriona" style={{ width: 220, objectFit: "contain" }} />
+          {/* ✅ marker visual para confirmar que estás viendo el login nuevo */}
+          <div style={{ marginTop: 8, fontSize: 12, color: C.muted }}>{t.marker}</div>
         </div>
 
         {/* BANDERAS */}
@@ -280,7 +284,7 @@ export default function LoginPage() {
           </button>
         </div>
 
-        {/* ✅ Botón ubicación en LOGIN */}
+        {/* ✅ BOTÓN GPS (nuevo) */}
         <button
           onClick={useMyLocation}
           disabled={busy}
