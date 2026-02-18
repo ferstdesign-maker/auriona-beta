@@ -146,7 +146,14 @@ function isWeatherQuery(message: string) {
 function userAskedLong(message: string) {
   const m = message.toLowerCase();
 
-  const shortHints = ["corto", "breve", "resumen", "en 2 frases", "en una frase", "sin vueltas"];
+  const shortHints = [
+    "corto",
+    "breve",
+    "resumen",
+    "en 2 frases",
+    "en una frase",
+    "sin vueltas",
+  ];
   if (shortHints.some((k) => m.includes(k))) return false;
 
   const triggers = [
@@ -171,18 +178,20 @@ function userAskedLong(message: string) {
 
 function detectCommandMode(message: string): UiMode | null {
   const m = message.trim().toLowerCase();
-  if (m === "auri silencio" || m === "/silencio" || m === "modo silencio") return "silence";
-  if (m === "auri peligro" || m === "/peligro" || m === "modo peligro") return "danger";
-  if (m === "auri normal" || m === "/normal" || m === "modo normal") return "normal";
+  if (m === "auri silencio" || m === "/silencio" || m === "modo silencio")
+    return "silence";
+  if (m === "auri peligro" || m === "/peligro" || m === "modo peligro")
+    return "danger";
+  if (m === "auri normal" || m === "/normal" || m === "modo normal")
+    return "normal";
   return null;
 }
 
 async function reverseGeocode(lat: number, lon: number): Promise<string | null> {
   try {
-    const url =
-      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(
-        lat
-      )}&lon=${encodeURIComponent(lon)}&zoom=12&addressdetails=1`;
+    const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(
+      lat
+    )}&lon=${encodeURIComponent(lon)}&zoom=12&addressdetails=1`;
 
     const res = await fetch(url, {
       headers: {
@@ -193,7 +202,8 @@ async function reverseGeocode(lat: number, lon: number): Promise<string | null> 
 
     const j = (await res.json()) as any;
     const a = j?.address || {};
-    const city = a.city || a.town || a.village || a.municipality || a.county || null;
+    const city =
+      a.city || a.town || a.village || a.municipality || a.county || null;
     if (city) return String(city);
 
     const dn = String(j?.display_name || "")
@@ -222,7 +232,8 @@ async function getTomorrowForecastByGPS(lat: number, lon: number) {
 
   const j = (await res.json()) as any;
   const d = j?.daily;
-  if (!d || !Array.isArray(d.time) || d.time.length < 2) throw new Error("weather_bad_data");
+  if (!d || !Array.isArray(d.time) || d.time.length < 2)
+    throw new Error("weather_bad_data");
 
   const date = d.time[1];
   const tmax = d.temperature_2m_max?.[1];
@@ -253,7 +264,8 @@ function buildSystemPrompt(args: {
   effectiveMode: UiMode;
   hasHeadphones: boolean;
 }) {
-  const { lang, callUser, callAssistant, allowLong, effectiveMode, hasHeadphones } = args;
+  const { lang, callUser, callAssistant, allowLong, effectiveMode, hasHeadphones } =
+    args;
 
   let base = `
 Sos Auriona (Auri), cálida y MUY humana. Nada robótico.
@@ -304,12 +316,11 @@ El usuario pidió detalle: podés extenderte, sin links, con pasos (máximo 6) y
 
 /**
  * ✅ Llamada streaming a OpenAI /v1/responses (SSE) y extrae deltas.
- * Esto NO depende del SDK: es “a prueba de versiones”.
+ * Importante: NO mandamos temperature (gpt-5-mini no lo soporta).
  */
 async function streamOpenAIResponse(args: {
   model: string;
   messages: ChatHistoryItem[];
-  temperature: number;
   maxTokens: number;
   signal?: AbortSignal;
 }) {
@@ -325,7 +336,6 @@ async function streamOpenAIResponse(args: {
     body: JSON.stringify({
       model: args.model,
       input: args.messages,
-      temperature: args.temperature,
       max_output_tokens: args.maxTokens,
       stream: true,
       store: false,
@@ -384,7 +394,8 @@ export async function POST(req: Request) {
     const cmd = detectCommandMode(message);
     if (cmd) {
       const speak = cmd === "normal" ? true : cmd === "danger" ? hasHeadphones : false;
-      const reply = cmd === "danger" && !hasHeadphones ? buildDangerCoverText(lang) : "Ok.";
+      const reply =
+        cmd === "danger" && !hasHeadphones ? buildDangerCoverText(lang) : "Ok.";
       return NextResponse.json({
         reply: clamp(reply, HARD_MAX_SHORT),
         used_web: false,
@@ -405,7 +416,10 @@ export async function POST(req: Request) {
     });
 
     if (policy?.action && policy.action !== "allow") {
-      const safe = clamp(sanitizeReply(String(policy.reply ?? "No puedo ayudar con eso.")), HARD_MAX_SHORT);
+      const safe = clamp(
+        sanitizeReply(String(policy.reply ?? "No puedo ayudar con eso.")),
+        HARD_MAX_SHORT
+      );
       return NextResponse.json({
         reply: safe,
         used_web: false,
@@ -419,7 +433,8 @@ export async function POST(req: Request) {
     // ✅ PELIGRO sin auriculares: tapadera (y NO hablar)
     if (uiMode === "danger" && !hasHeadphones) {
       const wantWeather = isWeatherQuery(message);
-      const hasGeo = typeof location?.lat === "number" && typeof location?.lon === "number";
+      const hasGeo =
+        typeof location?.lat === "number" && typeof location?.lon === "number";
 
       if (wantWeather && hasGeo) {
         const lat = Number(location.lat);
@@ -466,7 +481,8 @@ export async function POST(req: Request) {
     if (wantWeather) {
       if (!hasGeo) {
         return NextResponse.json({
-          reply: "Para darte el pronóstico exacto necesito tu GPS activo o que me digas tu ciudad. ¿Dónde estás ahora?",
+          reply:
+            "Para darte el pronóstico exacto necesito tu GPS activo o que me digas tu ciudad. ¿Dónde estás ahora?",
           used_web: false,
           source: "weather_guard",
           marker: MARKER,
@@ -529,11 +545,9 @@ export async function POST(req: Request) {
     const modelPreferred = String(process.env.OPENAI_MODEL || "").trim();
     const model = modelPreferred || "gpt-5-mini"; // fallback simple
 
-    // abrimos stream hacia OpenAI
     const upstream = await streamOpenAIResponse({
       model,
       messages,
-      temperature: 0.25,
       maxTokens,
       signal: req.signal,
     });
@@ -542,12 +556,11 @@ export async function POST(req: Request) {
     let buffer = "";
     let full = "";
 
-    // Para que el front sepa si debe hablar
-    const speak = uiMode === "normal" ? true : uiMode === "danger" ? hasHeadphones : false;
+    const speak =
+      uiMode === "normal" ? true : uiMode === "danger" ? hasHeadphones : false;
 
     const stream = new ReadableStream<Uint8Array>({
       async start(controller) {
-        // header inicial (opcional)
         controller.enqueue(
           new TextEncoder().encode(
             sseData({
@@ -567,7 +580,6 @@ export async function POST(req: Request) {
 
             buffer += decoder.decode(value, { stream: true });
 
-            // SSE: eventos separados por \n\n
             const parts = buffer.split("\n\n");
             buffer = parts.pop() || "";
 
@@ -577,7 +589,6 @@ export async function POST(req: Request) {
 
               const payload = line.slice(6).trim();
               if (payload === "[DONE]") {
-                // final
                 const finalText = clamp(sanitizeReply(full), maxChars);
                 controller.enqueue(
                   new TextEncoder().encode(
@@ -603,20 +614,17 @@ export async function POST(req: Request) {
                 continue;
               }
 
-              // Responses stream: delta típico
-              // type: "response.output_text.delta", delta: "..."
-              if (evt?.type === "response.output_text.delta" && typeof evt.delta === "string") {
+              if (
+                evt?.type === "response.output_text.delta" &&
+                typeof evt.delta === "string"
+              ) {
                 const delta = evt.delta;
                 full += delta;
-
                 controller.enqueue(
-                  new TextEncoder().encode(
-                    sseData({ type: "delta", delta })
-                  )
+                  new TextEncoder().encode(sseData({ type: "delta", delta }))
                 );
               }
 
-              // si llega completed sin DONE, igual cerramos
               if (evt?.type === "response.completed") {
                 const finalText = clamp(sanitizeReply(full), maxChars);
                 controller.enqueue(
@@ -638,7 +646,6 @@ export async function POST(req: Request) {
             }
           }
 
-          // si salimos sin DONE, cerramos igual
           const finalText = clamp(sanitizeReply(full), maxChars);
           controller.enqueue(
             new TextEncoder().encode(
