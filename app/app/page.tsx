@@ -6,6 +6,7 @@ import { supabase } from "../../lib/supabase";
 type Msg = { role: "user" | "auri"; text: string };
 type Lang = "es" | "pt" | "en";
 type LocationState = { lat: number | null; lon: number | null };
+type UiMode = "normal" | "silence" | "danger";
 
 declare global {
   interface Window {
@@ -25,10 +26,13 @@ export default function AppPage() {
   const [lang, setLang] = useState<Lang>("es");
   const [autoSpeak, setAutoSpeak] = useState(true);
 
+  // ✅ modos
+  const [uiMode, setUiMode] = useState<UiMode>("normal");
+  const [hasHeadphones, setHasHeadphones] = useState(false);
+
   const [listening, setListening] = useState(false);
   const recRef = useRef<any>(null);
 
-  // ✅ La ubicación ahora se toma del LOGIN (localStorage) sin botón en el chat
   const [loc, setLoc] = useState<LocationState>({ lat: null, lon: null });
 
   const [isMobile, setIsMobile] = useState(false);
@@ -55,22 +59,173 @@ export default function AppPage() {
     soft: "rgba(255,255,255,0.06)",
   };
 
-  function stopSpeaking() {
+  // =========================
+  // ✅ AUDIO (ElevenLabs)
+  // =========================
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const lastUrlRef = useRef<string | null>(null);
+  const [audioUnlocked, setAudioUnlocked] = useState(false);
+  const [audioHint, setAudioHint] = useState<string | null>(null);
+  const TTS_MAX_CHARS = 220;
+
+  function cleanupAudio() {
     try {
-      if (typeof window !== "undefined" && "speechSynthesis" in window) {
-        window.speechSynthesis.cancel();
+      const a = audioRef.current;
+      if (a) {
+        a.pause();
+        a.src = "";
+      }
+      audioRef.current = null;
+
+      if (lastUrlRef.current) {
+        try {
+          URL.revokeObjectURL(lastUrlRef.current);
+        } catch {}
+        lastUrlRef.current = null;
       }
     } catch {}
   }
 
+  function stopSpeaking() {
+    cleanupAudio();
+  }
+
+  function uiHintUnlock() {
+    return lang === "en"
+      ? "Tap/click once to enable audio."
+      : lang === "pt"
+      ? "Toque/clique uma vez para ativar o áudio."
+      : "Tocá / cliqueá una vez para habilitar el audio.";
+  }
+
+  function clampForTTS(text: string, maxChars: number) {
+    const t = String(text || "").trim();
+    if (!t) return "";
+    if (t.length <= maxChars) return t;
+
+    const slice = t.slice(0, maxChars);
+    const lastStop = Math.max(
+      slice.lastIndexOf("."),
+      slice.lastIndexOf("?"),
+      slice.lastIndexOf("!"),
+      slice.lastIndexOf("\n")
+    );
+
+    const cut =
+      lastStop > Math.floor(maxChars * 0.55) ? slice.slice(0, lastStop + 1) : slice;
+
+    return cut.trim() + "…";
+  }
+
+  function normalizeForTTS(text: string) {
+    let t = String(text || "");
+    t = t.replace(/https?:\/\/\S+/gi, " ");
+    t = t.replace(/\bwww\.\S+/gi, " ");
+    t = t.replace(/\S+@\S+\.\S+/g, " ");
+    t = t.replace(/[()[\]{}<>]/g, " ");
+    t = t.replace(/\s+/g, " ").trim();
+
+    t = t.replace(/\bKMS\b/gi, "kilómetros");
+    t = t.replace(/\bKM\/H\b/gi, "kilómetros por hora");
+    t = t.replace(/\bKMH\b/gi, "kilómetros por hora");
+    t = t.replace(/\bKM\b/gi, "kilómetro");
+
+    t = t.replace(/(\d)\s*°\s*C/gi, "$1 grados");
+    t = t.replace(/(\d)\s*°C/gi, "$1 grados");
+    t = t.replace(/(\d+)\s*%/g, "$1 por ciento");
+    t = t.replace(/\bUSD\s*(\d+)/gi, "dólares $1");
+
+    return t.replace(/\s+/g, " ").trim();
+  }
+
+  async function speak(text: string) {
+    if (!autoSpeak) return;
+    if (typeof window === "undefined") return;
+
+    // hard rule: solo habla en normal, o peligro con auriculares
+    const speakAllowed = uiMode === "normal" ? true : uiMode === "danger" ? hasHeadphones : false;
+    if (!speakAllowed) return;
+
+    if (!audioUnlocked) {
+      setAudioHint(uiHintUnlock());
+      return;
+    }
+
+    const cleaned = normalizeForTTS(text);
+    const ttsText = clampForTTS(cleaned, TTS_MAX_CHARS);
+    if (!ttsText) return;
+
+    stopSpeaking();
+
+    try {
+      const res = await fetch("/api/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: ttsText, lang }),
+      });
+
+      if (!res.ok) {
+        setAudioHint("Audio no disponible (TTS).");
+        return;
+      }
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      lastUrlRef.current = url;
+
+      const a = new Audio(url);
+      a.playbackRate = 1.45;
+      a.volume = 1.0;
+
+      a.onended = () => {
+        try {
+          if (lastUrlRef.current) {
+            URL.revokeObjectURL(lastUrlRef.current);
+            lastUrlRef.current = null;
+          }
+        } catch {}
+      };
+
+      a.onerror = () => setAudioHint("No pude reproducir audio.");
+
+      audioRef.current = a;
+
+      await a.play().catch(() => {
+        setAudioUnlocked(false);
+        setAudioHint(uiHintUnlock());
+      });
+    } catch {
+      setAudioHint("Audio no disponible (error).");
+    }
+  }
+
+  useEffect(() => {
+    function unlock() {
+      setAudioUnlocked(true);
+      setAudioHint(null);
+      window.removeEventListener("pointerdown", unlock);
+      window.removeEventListener("keydown", unlock);
+      window.removeEventListener("touchstart", unlock);
+    }
+    window.addEventListener("pointerdown", unlock);
+    window.addEventListener("keydown", unlock);
+    window.addEventListener("touchstart", unlock);
+    return () => {
+      window.removeEventListener("pointerdown", unlock);
+      window.removeEventListener("keydown", unlock);
+      window.removeEventListener("touchstart", unlock);
+    };
+  }, []);
+
+  // =========================
+  // ✅ Helpers
+  // =========================
   function getStoredLang(): Lang {
     const v = (typeof window !== "undefined" && localStorage.getItem("auri_lang")) || "es";
     if (v === "pt" || v === "en" || v === "es") return v;
     return "es";
   }
 
-  // ✅ Nuevo: leemos primero la key del LOGIN "auriona_geo"
-  // ✅ Fallback: si existía la key vieja "auri_loc", la toma también.
   function getStoredLoc(): LocationState {
     if (typeof window === "undefined") return { lat: null, lon: null };
 
@@ -121,7 +276,6 @@ export default function AppPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ✅ teclado Android
   useEffect(() => {
     function updateKeyboardOffset() {
       const vv = window.visualViewport;
@@ -154,13 +308,6 @@ export default function AppPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [input, showMenu, isMobile]);
 
-  // ✅ Si el usuario cambia la ubicación desde login (otra sesión),
-  // este effect la vuelve a leer al montar.
-  useEffect(() => {
-    setLoc(getStoredLoc());
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   useEffect(() => {
     (async () => {
       const { data } = await supabase.auth.getUser();
@@ -190,7 +337,6 @@ export default function AppPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [msgs]);
 
-  // ✅ SpeechRecognition init
   useEffect(() => {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) return;
@@ -214,51 +360,6 @@ export default function AppPage() {
     rec.onend = () => setListening(false);
     recRef.current = rec;
   }, [lang]);
-
-  // ✅ Voz: preferir es-AR y voz femenina si existe
-  function speak(text: string) {
-    try {
-      if (!autoSpeak) return;
-      if (typeof window === "undefined") return;
-      if (!("speechSynthesis" in window)) return;
-
-      const targetLang = lang === "pt" ? "pt-BR" : lang === "en" ? "en-US" : "es-AR";
-
-      // ✅ evita superposiciones
-      stopSpeaking();
-
-      const u = new SpeechSynthesisUtterance(text);
-      u.lang = targetLang;
-      u.rate = 1.02;
-      u.pitch = 1.03;
-
-      const voices = window.speechSynthesis.getVoices?.() || [];
-      const lower = (s: string) => (s || "").toLowerCase();
-
-      const isFemaleName = (name: string) => {
-        const n = lower(name);
-        return (
-          n.includes("female") ||
-          n.includes("mujer") ||
-          n.includes("woman") ||
-          n.includes("paulina") ||
-          n.includes("sofia") ||
-          n.includes("lucia")
-        );
-      };
-
-      let v =
-        voices.find((x) => lower(x.lang) === "es-ar" && isFemaleName(x.name)) ||
-        voices.find((x) => lower(x.lang) === "es-ar") ||
-        voices.find((x) => lower(x.lang).startsWith("es") && isFemaleName(x.name)) ||
-        voices.find((x) => lower(x.lang).startsWith("es")) ||
-        voices.find((x) => isFemaleName(x.name));
-
-      if (v) u.voice = v;
-
-      window.speechSynthesis.speak(u);
-    } catch {}
-  }
 
   async function loadMainConversation() {
     const { data: rows, error } = await supabase
@@ -319,12 +420,11 @@ export default function AppPage() {
 
     const txt = `Listo ${callUser}. Empezamos de cero.`;
     setMsgs([{ role: "auri", text: txt }]);
-    speak(txt);
+    await speak(txt);
     setShowMenu(false);
     setTimeout(() => scrollToBottom(true), 50);
   }
 
-  // ✅ Mic: tap ON/OFF (más estable que “mantener apretado”)
   function toggleMic() {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR || !recRef.current) {
@@ -332,7 +432,6 @@ export default function AppPage() {
       return;
     }
 
-    // ✅ si vas a hablar, cortamos TTS para que no se mezcle
     stopSpeaking();
 
     if (!listening) {
@@ -351,12 +450,51 @@ export default function AppPage() {
     }
   }
 
+  function handleModeCommandLocally(text: string): UiMode | null {
+    const m = text.trim().toLowerCase();
+    if (m === "auri silencio" || m === "/silencio" || m === "modo silencio") return "silence";
+    if (m === "auri peligro" || m === "/peligro" || m === "modo peligro") return "danger";
+    if (m === "auri normal" || m === "/normal" || m === "modo normal") return "normal";
+    return null;
+  }
+
+  // ✅ parse SSE que viene de /api/chat
+  function parseSSEChunk(chunk: string, onEvent: (obj: any) => void) {
+    const blocks = chunk.split("\n\n");
+    for (const b of blocks) {
+      const line = b.split("\n").find((l) => l.startsWith("data: "));
+      if (!line) continue;
+      const payload = line.slice(6).trim();
+      if (!payload) continue;
+      try {
+        onEvent(JSON.parse(payload));
+      } catch {
+        // ignore
+      }
+    }
+  }
+
   async function send() {
     const text = input.trim();
     if (!text || busy) return;
 
     setInput("");
-    setMsgs((m) => [...m, { role: "user", text }]);
+
+    // comandos locales
+    const cmd = handleModeCommandLocally(text);
+    if (cmd) {
+      setUiMode(cmd);
+      const reply = cmd === "danger" ? "Entendido." : "Ok.";
+      setMsgs((m) => [...m, { role: "user", text }, { role: "auri", text: reply }]);
+      await saveMessage("user", text);
+      await saveMessage("auri", reply);
+      await speak(reply);
+      setTimeout(() => scrollToBottom(true), 40);
+      return;
+    }
+
+    // push user + placeholder auri
+    setMsgs((m) => [...m, { role: "user", text }, { role: "auri", text: "" }]);
     setBusy(true);
     await saveMessage("user", text);
 
@@ -366,8 +504,7 @@ export default function AppPage() {
         content: m.text,
       }));
 
-      const safeLocation =
-        typeof loc?.lat === "number" && typeof loc?.lon === "number" ? loc : {};
+      const safeLocation = typeof loc?.lat === "number" && typeof loc?.lon === "number" ? loc : {};
 
       const res = await fetch("/api/chat", {
         method: "POST",
@@ -378,21 +515,118 @@ export default function AppPage() {
           lang,
           location: safeLocation,
           profile: { callUser, callAssistant },
+          ui_mode: uiMode,
+          has_headphones: hasHeadphones,
+          stream: true,
         }),
       });
 
-      const data = await res.json();
-      const reply = String(data.reply ?? "");
+      const ct = res.headers.get("content-type") || "";
 
-      setMsgs((m) => [...m, { role: "auri", text: reply }]);
+      // ✅ si NO es stream, cae en JSON (policy/weather)
+      if (!ct.includes("text/event-stream")) {
+        const data = await res.json();
+        const reply = String(data.reply ?? "");
+        const speakAllowed = data.speak !== false;
+
+        const effective = String(data.effective_mode || "") as UiMode;
+        if (effective === "normal" || effective === "silence" || effective === "danger") setUiMode(effective);
+
+        // reemplaza el placeholder final
+        setMsgs((prev) => {
+          const next = [...prev];
+          next[next.length - 1] = { role: "auri", text: reply };
+          return next;
+        });
+
+        await saveMessage("auri", reply);
+        if (speakAllowed) await speak(reply);
+
+        setTimeout(() => scrollToBottom(true), 40);
+        return;
+      }
+
+      // ✅ STREAM: leemos el body
+      if (!res.body) throw new Error("No stream body");
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let carry = "";
+      let finalText = "";
+      let speakAllowed = true;
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        carry += decoder.decode(value, { stream: true });
+
+        // procesamos en bloques SSE
+        const parts = carry.split("\n\n");
+        carry = parts.pop() || "";
+
+        for (const part of parts) {
+          parseSSEChunk(part + "\n\n", (evt) => {
+            if (evt?.type === "meta") {
+              speakAllowed = evt.speak !== false;
+              const effective = String(evt.effective_mode || "") as UiMode;
+              if (effective === "normal" || effective === "silence" || effective === "danger") setUiMode(effective);
+              return;
+            }
+
+            if (evt?.type === "delta" && typeof evt.delta === "string") {
+              finalText += evt.delta;
+
+              // update placeholder en vivo
+              setMsgs((prev) => {
+                const next = [...prev];
+                const idx = next.length - 1;
+                next[idx] = { role: "auri", text: finalText };
+                return next;
+              });
+
+              // scroll suave
+              setTimeout(() => scrollToBottom(false), 10);
+              return;
+            }
+
+            if (evt?.type === "final") {
+              const text = String(evt.text ?? "").trim() || finalText.trim();
+              finalText = text;
+
+              speakAllowed = evt.speak !== false;
+              const effective = String(evt.effective_mode || "") as UiMode;
+              if (effective === "normal" || effective === "silence" || effective === "danger") setUiMode(effective);
+
+              setMsgs((prev) => {
+                const next = [...prev];
+                next[next.length - 1] = { role: "auri", text: finalText };
+                return next;
+              });
+            }
+
+            if (evt?.type === "error") {
+              throw new Error(String(evt.message || "stream_error"));
+            }
+          });
+        }
+      }
+
+      // guarda y habla al final
+      const reply = finalText.trim() || "No pude responder ahora. ¿Querés que lo intentemos de nuevo?";
       await saveMessage("auri", reply);
-      speak(reply);
+      if (speakAllowed) await speak(reply);
+
       setTimeout(() => scrollToBottom(true), 40);
     } catch {
       const fallback = "Tuve un problema de conexión.";
-      setMsgs((m) => [...m, { role: "auri", text: fallback }]);
+      setMsgs((prev) => {
+        const next = [...prev];
+        next[next.length - 1] = { role: "auri", text: fallback };
+        return next;
+      });
       await saveMessage("auri", fallback);
-      speak(fallback);
+      await speak(fallback);
       setTimeout(() => scrollToBottom(true), 40);
     } finally {
       setBusy(false);
@@ -449,13 +683,28 @@ export default function AppPage() {
   const contentTop = headerH;
   const contentBottom = footerH + kbOffset;
 
-  // ✅ Toggle VOZ con corte inmediato
   function toggleVoice() {
     setAutoSpeak((v) => {
       const next = !v;
-      if (!next) stopSpeaking(); // ✅ OFF => corta YA
+      if (!next) stopSpeaking();
       return next;
     });
+  }
+
+  function toggleSilence() {
+    setUiMode((m) => (m === "silence" ? "normal" : "silence"));
+    stopSpeaking();
+  }
+
+  function panicDanger() {
+    setUiMode("danger");
+    stopSpeaking();
+  }
+
+  function badgeMode() {
+    if (uiMode === "danger") return "PELIGRO";
+    if (uiMode === "silence") return "SILENCIO";
+    return "NORMAL";
   }
 
   return (
@@ -484,26 +733,38 @@ export default function AppPage() {
                 placeItems: "center",
               }}
             >
-              <img
-                src="/auriona-logo.png"
-                alt="Auriona"
-                style={{ width: "100%", maxWidth: 240, height: 70, objectFit: "contain" }}
-              />
+              <img src="/auriona-logo.png" alt="Auriona" style={{ width: "100%", maxWidth: 240, height: 70, objectFit: "contain" }} />
             </div>
 
-            {/* ✅ Botón de ubicación ELIMINADO */}
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button onClick={toggleVoice} style={topBtnStyle}>
+                🔊 Voz: {autoSpeak ? "ON" : "OFF"}
+              </button>
+              <button onClick={toggleSilence} style={topBtnStyle}>
+                🔇 Silencio: {uiMode === "silence" ? "ON" : "OFF"}
+              </button>
+              <button onClick={panicDanger} style={{ ...topBtnStyle, borderColor: "rgba(255,80,80,0.55)" }}>
+                🚨 Peligro
+              </button>
+            </div>
 
-            <button onClick={toggleVoice} style={topBtnStyle}>
-              🔊 Voz: {autoSpeak ? "ON" : "OFF"}
+            <button onClick={() => setHasHeadphones((v) => !v)} style={topBtnStyle}>
+              🎧 Auriculares: {hasHeadphones ? "SI" : "NO"}
             </button>
 
+            <div style={{ fontSize: 12, color: C.muted }}>
+              Modo actual: <b style={{ color: C.text }}>{badgeMode()}</b>
+            </div>
+
+            {audioHint && (
+              <div style={{ border: `1px solid ${C.border}`, borderRadius: 12, padding: 10, fontSize: 12, color: C.muted, background: "rgba(255,255,255,0.03)" }}>
+                {audioHint}
+              </div>
+            )}
+
             <div style={{ marginTop: "auto", display: "grid", gap: 10 }}>
-              <button onClick={clearConversation} style={topBtnStyle}>
-                Borrar historial
-              </button>
-              <button onClick={signOut} style={topBtnStyle}>
-                Cerrar sesión
-              </button>
+              <button onClick={clearConversation} style={topBtnStyle}>Borrar historial</button>
+              <button onClick={signOut} style={topBtnStyle}>Cerrar sesión</button>
             </div>
           </aside>
         )}
@@ -512,57 +773,43 @@ export default function AppPage() {
           <div ref={headerRef} style={fixedHeaderStyle}>
             {isMobile ? (
               <>
-                <button onClick={() => setShowMenu((v) => !v)} style={topBtnStyle} aria-label="Menu">
-                  ☰
-                </button>
-
+                <button onClick={() => setShowMenu((v) => !v)} style={topBtnStyle} aria-label="Menu">☰</button>
                 <div style={{ display: "flex", justifyContent: "center", flex: 1 }}>
                   <img src="/auriona-logo.png" alt="Auriona" style={{ width: 210, height: 48, objectFit: "contain" }} />
                 </div>
-
                 <div style={{ width: 44 }} />
               </>
             ) : (
               <>
                 <div style={{ fontWeight: 900 }}>{title}</div>
-                <div style={{ marginLeft: "auto", fontSize: 12, color: C.muted }}>Beta</div>
+                <div style={{ marginLeft: "auto", fontSize: 12, color: C.muted }}>
+                  Beta • <b style={{ color: C.text }}>{badgeMode()}</b>
+                </div>
               </>
             )}
           </div>
 
           {isMobile && showMenu && (
-            <div
-              style={{
-                position: "fixed",
-                top: headerH,
-                left: 0,
-                right: 0,
-                zIndex: 55,
-                borderBottom: `1px solid ${C.border}`,
-                background: C.panel,
-                padding: 12,
-                display: "grid",
-                gap: 10,
-              }}
-            >
-              {/* ✅ Botón de ubicación ELIMINADO */}
-
-              <button onClick={toggleVoice} style={topBtnStyle}>
-                🔊 Voz: {autoSpeak ? "ON" : "OFF"}
-              </button>
-              <button onClick={clearConversation} style={topBtnStyle}>
-                Borrar historial
-              </button>
-              <button onClick={signOut} style={topBtnStyle}>
-                Cerrar sesión
-              </button>
+            <div style={{ position: "fixed", top: headerH, left: 0, right: 0, zIndex: 55, borderBottom: `1px solid ${C.border}`, background: C.panel, padding: 12, display: "grid", gap: 10 }}>
+              <button onClick={toggleVoice} style={topBtnStyle}>🔊 Voz: {autoSpeak ? "ON" : "OFF"}</button>
+              <button onClick={toggleSilence} style={topBtnStyle}>🔇 Silencio: {uiMode === "silence" ? "ON" : "OFF"}</button>
+              <button onClick={panicDanger} style={{ ...topBtnStyle, borderColor: "rgba(255,80,80,0.55)" }}>🚨 Peligro</button>
+              <button onClick={() => setHasHeadphones((v) => !v)} style={topBtnStyle}>🎧 Auriculares: {hasHeadphones ? "SI" : "NO"}</button>
+              <div style={{ fontSize: 12, color: C.muted }}>Modo actual: <b style={{ color: C.text }}>{badgeMode()}</b></div>
+              {audioHint && (
+                <div style={{ border: `1px solid ${C.border}`, borderRadius: 12, padding: 10, fontSize: 12, color: C.muted, background: "rgba(255,255,255,0.03)" }}>
+                  {audioHint}
+                </div>
+              )}
+              <button onClick={clearConversation} style={topBtnStyle}>Borrar historial</button>
+              <button onClick={signOut} style={topBtnStyle}>Cerrar sesión</button>
             </div>
           )}
 
           <div
             style={{
               position: "absolute",
-              top: contentTop + (isMobile && showMenu ? 230 : 0),
+              top: contentTop + (isMobile && showMenu ? 270 : 0),
               left: isMobile ? 0 : 320,
               right: 0,
               bottom: contentBottom,
@@ -587,7 +834,7 @@ export default function AppPage() {
                       wordBreak: "break-word",
                     }}
                   >
-                    {m.text}
+                    {m.text || (busy && !isUser ? "…" : "")}
                   </div>
                 </div>
               );
